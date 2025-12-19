@@ -1,0 +1,17 @@
+(ns mongol-ime.toggle
+  (:require
+   ["package:flutter/material.dart" :as m]))
+
+(defn ime-toggle [{:keys [enabled? on-toggle]}]
+  (m/Positioned
+   .right 16
+   .bottom 16
+   .child
+   (m/FloatingActionButton
+    .onPressed on-toggle
+    .tooltip (if enabled? "禁用蒙古文输入法" "启用蒙古文输入法")
+    .child (m/Icon
+            (if enabled?
+              m.Icons/keyboard
+              m.Icons/keyboard_hide)))))
+

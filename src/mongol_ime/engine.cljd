@@ -1,0 +1,42 @@
+(ns mongol-ime.engine)
+
+;; 简单的候选引擎实现
+;; 在实际项目中，这里应该调用 mongol-virtual-keyboard 的 get-candidates 函数
+;; 目前提供一个基本的占位实现
+
+(defn get-candidates [input]
+  (if (empty? input)
+    []
+    ;; 示例：根据输入的第一个字符生成候选词
+    (let [first-char (subs input 0 (min 1 (count input)))
+          candidate-map {"a" ["ᠠ" "ᠠᠠ" "ᠠᠠᠠ"]
+                         "e" ["ᠡ" "ᠡᠡ" "ᠡᠡᠡ"]
+                         "i" ["ᠢ" "ᠢᠢ" "ᠢᠢᠢ"]
+                         "o" ["ᠣ" "ᠣᠣ" "ᠣᠣᠣ"]
+                         "u" ["ᠤ" "ᠤᠤ" "ᠤᠤᠤ"]
+                         "n" ["ᠨ" "ᠨᠨ" "ᠨᠨᠨ"]
+                         "b" ["ᠪ" "ᠪᠪ" "ᠪᠪᠪ"]
+                         "p" ["ᠫ" "ᠫᠫ" "ᠫᠫᠫ"]
+                         "q" ["ᠬ" "ᠬᠬ" "ᠬᠬᠬ"]
+                         "g" ["ᠭ" "ᠭᠭ" "ᠭᠭᠭ"]
+                         "m" ["ᠮ" "ᠮᠮ" "ᠮᠮᠮ"]
+                         "l" ["ᠯ" "ᠯᠯ" "ᠯᠯᠯ"]
+                         "s" ["ᠰ" "ᠰᠰ" "ᠰᠰᠰ"]
+                         "t" ["ᠲ" "ᠲᠲ" "ᠲᠲᠲ"]
+                         "d" ["ᠳ" "ᠳᠳ" "ᠳᠳᠳ"]
+                         "j" ["ᠵ" "ᠵᠵ" "ᠵᠵᠵ"]
+                         "y" ["ᠶ" "ᠶᠶ" "ᠶᠶᠶ"]
+                         "r" ["ᠷ" "ᠷᠷ" "ᠷᠷᠷ"]
+                         "w" ["ᠸ" "ᠸᠸ" "ᠸᠸᠸ"]
+                         "f" ["ᠹ" "ᠹᠹ" "ᠹᠹᠹ"]
+                         "k" ["ᠺ" "ᠺᠺ" "ᠺᠺᠺ"]
+                         "c" ["ᠼ" "ᠼᠼ" "ᠼᠼᠼ"]
+                         "z" ["ᠽ" "ᠽᠽ" "ᠽᠽᠽ"]
+                         "h" ["ᠾ" "ᠾᠾ" "ᠾᠾᠾ"]}
+          base-candidates (get candidate-map first-char ["ᠠ" "ᠡ" "ᠢ" "ᠣ" "ᠤ"])]
+      (vec (take 9 base-candidates)))))
+
+;; 如果需要调用真实的 mongol-virtual-keyboard，可以这样：
+;; (defn get-candidates [input]
+;;   (vk/get-candidates input))
+

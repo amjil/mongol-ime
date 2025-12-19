@@ -1,0 +1,236 @@
+(ns mongol-ime.host
+  (:require
+   ["package:flutter/widgets.dart" :as w]
+   ["package:flutter/material.dart" :as m]
+   [mongol-ime.controller :as ime]
+   [mongol-ime.engine :as engine]
+   [mongol-ime.candidate-popup :as popup]
+   [mongol-ime.position :as pos]
+   [cljd.flutter :as f]))
+
+(def page-size 9)
+
+(defn get-cursor-position [text-controller _]
+  (try
+    (let [selection (.-selection text-controller)]
+      (if selection
+        {:x 100 :y 100}
+        {:x 0 :y 0}))
+    (catch Exception _
+      {:x 0 :y 0})))
+
+(defn create-overlay-entry [state overlay-entry text-controller]
+  (w/OverlayEntry.
+   .builder
+   (fn [ctx]
+     (let [ime-state @state
+           cands (:candidates ime-state)
+           selected (:selected ime-state)
+           page (:page ime-state)
+           cursor-pos (get-cursor-position text-controller ctx)
+           overlay-size {:w 300 :h 200}
+           media-query (.of m/MediaQuery ctx)
+           window-size {:ww (.-width media-query)
+                        :wh (.-height media-query)}
+           final-pos (pos/adjust-position
+                      {:cursor cursor-pos
+                       :overlay-size overlay-size
+                       :window-size window-size})]
+       (w/Positioned
+        .left (.-x final-pos)
+        .top (.-y final-pos)
+        .child
+        (popup/popup-widget
+         {:candidates cands
+          :selected selected
+          :page page
+          :page-size page-size
+          :on-hover (fn [idx]
+                      (swap! state assoc :selected idx)
+                      (when @overlay-entry
+                        (.markNeedsBuild @overlay-entry)))
+          :on-tap (fn [idx]
+                    (let [result (ime/pick-selected
+                                  (assoc @state :selected idx))]
+                      (when text-controller
+                        (let [text (.-text text-controller)
+                              selection (.-selection text-controller)
+                              composing-len (count (:composing @state))
+                              start (.-start selection)
+                              end (.-end selection)
+                              new-text (str (subs text 0 (- start composing-len))
+                                            (:commit result)
+                                            (subs text end))
+                              new-cursor (+ (- start composing-len)
+                                            (count (:commit result)))]
+                          (set! (.-text text-controller) new-text)
+                          (set! (.-selection text-controller)
+                                (m/TextSelection.collapsed .offset new-cursor))))
+                      (reset! state (:state result))
+                      (when @overlay-entry
+                        (.remove @overlay-entry)
+                        (reset! overlay-entry nil))))}))))))
+
+(defn mongol-ime-host [{:keys [child enabled? text-controller]}]
+  (let [state (atom (ime/new-ime-state))
+        overlay-entry (atom nil)
+        overlay-ref (atom nil)
+        focus-node (w/FocusNode.)
+        update-overlay (fn []
+                         (let [ime-state @state
+                               candidates (:candidates ime-state)
+                               composing (:composing ime-state)
+                               should-show-popup (and enabled? (seq candidates) (seq composing))]
+                           (when @overlay-ref
+                             (if should-show-popup
+                               (do
+                                 ;; 如果 OverlayEntry 不存在，创建并插入
+                                 (when (nil? @overlay-entry)
+                                   (reset! overlay-entry (create-overlay-entry state overlay-entry text-controller))
+                                   (.insert @overlay-ref @overlay-entry))
+                                 ;; 如果 OverlayEntry 已存在，更新它
+                                 (when @overlay-entry
+                                   (.markNeedsBuild @overlay-entry)))
+                               ;; 如果不需要显示候选框，移除 OverlayEntry
+                               (when @overlay-entry
+                                 (.remove @overlay-entry)
+                                 (reset! overlay-entry nil))))))]
+    
+    (f/widget
+     :watch [_ state]
+     (w/Builder
+      .builder
+       (fn [context]
+         ;; 读取状态以触发重建
+         (let [_ @state
+               overlay (.of m/Overlay context)]
+           (reset! overlay-ref overlay)
+           ;; 更新候选框显示状态
+           (update-overlay)
+           
+           (w/Listener
+            .onPointerDown (fn [_]
+                              (when (and @overlay-entry
+                                         (seq (:candidates @state)))
+                                (.remove @overlay-entry)
+                                (reset! overlay-entry nil)
+                                (swap! state ime/reset-ime)))
+             .child (w/RawKeyboardListener
+                     .focusNode focus-node
+                     .autofocus false
+                     .onKey (fn [e]
+                               (let [logical-key (.-logicalKey e)
+                                     key-label (when logical-key (.-keyLabel logical-key))]
+                                 (when (and enabled? (some? key-label))
+                                   (cond
+                                     (= key-label "Backspace")
+                                     (do
+                                       (swap! state ime/handle-backspace engine/get-candidates)
+                                       (update-overlay))
+                                     
+                                     (re-matches #"^[a-z]$" key-label)
+                                     (do
+                                       (swap! state ime/handle-char key-label engine/get-candidates)
+                                       (update-overlay))
+                                     
+                                     (re-matches #"^[1-9]$" key-label)
+                                     (let [num (int key-label)
+                                           idx (dec num)
+                                           current-page (:page @state)
+                                           page-start (* current-page page-size)
+                                           target-idx (+ page-start idx)]
+                                       (when (< target-idx (count (:candidates @state)))
+                                         (let [result (ime/pick-selected
+                                                       (assoc @state :selected target-idx))]
+                                           (when text-controller
+                                             (let [text (.-text text-controller)
+                                                   selection (.-selection text-controller)
+                                                   composing-len (count (:composing @state))
+                                                   start (.-start selection)
+                                                   end (.-end selection)
+                                                   new-text (str (subs text 0 (- start composing-len))
+                                                                (:commit result)
+                                                                (subs text end))
+                                                   new-cursor (+ (- start composing-len)
+                                                                (count (:commit result)))]
+                                               (set! (.-text text-controller) new-text)
+                                               (set! (.-selection text-controller)
+                                                     (m/TextSelection.collapsed .offset new-cursor))))
+                                           (reset! state (:state result))
+                                           (when @overlay-entry
+                                             (.remove @overlay-entry)
+                                             (reset! overlay-entry nil)))))
+                                     
+                                     (= key-label "Arrow Up")
+                                     (do
+                                       (swap! state ime/select-prev)
+                                       (when @overlay-entry
+                                         (.markNeedsBuild @overlay-entry)))
+                                     
+                                     (= key-label "Arrow Down")
+                                     (do
+                                       (swap! state ime/select-next)
+                                       (when @overlay-entry
+                                         (.markNeedsBuild @overlay-entry)))
+                                     
+                                     (= key-label "Arrow Right")
+                                     (do
+                                       (swap! state ime/page-next page-size)
+                                       (when @overlay-entry
+                                         (.markNeedsBuild @overlay-entry)))
+                                     
+                                     (= key-label "Arrow Left")
+                                     (do
+                                       (swap! state ime/page-prev)
+                                       (when @overlay-entry
+                                         (.markNeedsBuild @overlay-entry)))
+                                     
+                                     (= key-label " ")
+                                     (let [result (ime/pick-selected @state)]
+                                       (when text-controller
+                                         (let [text (.-text text-controller)
+                                               selection (.-selection text-controller)
+                                               composing-len (count (:composing @state))
+                                               start (.-start selection)
+                                               end (.-end selection)
+                                               new-text (str (subs text 0 (- start composing-len))
+                                                            (:commit result)
+                                                            (subs text end))
+                                               new-cursor (+ (- start composing-len)
+                                                            (count (:commit result)))]
+                                           (set! (.-text text-controller) new-text)
+                                           (set! (.-selection text-controller)
+                                                 (m/TextSelection.collapsed .offset new-cursor))))
+                                       (reset! state (:state result))
+                                       (when @overlay-entry
+                                         (.remove @overlay-entry)
+                                         (reset! overlay-entry nil)))
+                                     
+                                     (= key-label "Enter")
+                                     (let [result (ime/pick-selected @state)]
+                                       (when text-controller
+                                         (let [text (.-text text-controller)
+                                               selection (.-selection text-controller)
+                                               composing-len (count (:composing @state))
+                                               start (.-start selection)
+                                               end (.-end selection)
+                                               new-text (str (subs text 0 (- start composing-len))
+                                                            (:commit result)
+                                                            (subs text end))
+                                               new-cursor (+ (- start composing-len)
+                                                            (count (:commit result)))]
+                                           (set! (.-text text-controller) new-text)
+                                           (set! (.-selection text-controller)
+                                                 (m/TextSelection.collapsed .offset new-cursor))))
+                                       (reset! state (:state result))
+                                       (when @overlay-entry
+                                         (.remove @overlay-entry)
+                                         (reset! overlay-entry nil)))
+                                     
+                                     (= key-label "Escape")
+                                     (do
+                                       (swap! state ime/cancel-ime)
+                                       (when @overlay-entry
+                                         (.remove @overlay-entry)
+                                         (reset! overlay-entry nil)))))))
+                      .child child))))))))
