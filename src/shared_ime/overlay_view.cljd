@@ -1,0 +1,49 @@
+(ns shared-ime.overlay-view
+  (:require
+   ["package:flutter/material.dart" :as m]
+   ["package:mongol/mongol.dart" :as mongol]
+   [cljd.flutter :as f]
+   [shared-ime.controller :as ctrl]))
+
+(defn- candidate-item [idx word is-suffix]
+  (m/Padding
+   .padding (m.EdgeInsets/symmetric .horizontal 10.0)
+   .child
+   (m/Column
+    .mainAxisSize m.MainAxisSize/min
+    .children
+    [(m/Text (str (inc idx) ".") .style (m/TextStyle .fontSize 12.0 .color m.Colors/grey))
+     ;; 🔑 直接替换为 MongolText，去掉了 m/Row 和 "-" 符号
+     (mongol/MongolText word .style (m/TextStyle .fontSize 26.0 .color m.Colors/black))])))
+     
+(defn candidates-overlay [state]
+  (let [{:keys [buffer candidates page-index page-size caret-offset]} state
+        display-cands (->> candidates (drop (* page-index page-size)) (take page-size))
+        show? (and (or (seq buffer) (seq candidates)) (seq display-cands))
+        is-suffix? (empty? buffer)]
+    (if show?
+      (m/Positioned
+       .left (if caret-offset (+ (.-dx caret-offset) 30.0) 100.0)
+       .top (if caret-offset (.-dy caret-offset) 100.0)
+       .child
+       (m/Material
+        .elevation 8.0 .color m.Colors/white .borderRadius (m.BorderRadius/circular 4.0)
+        .child
+        (m/Container
+         .padding (m.EdgeInsets/all 10.0)
+         .decoration (m/BoxDecoration .border (m/Border.all .color (if is-suffix? m.Colors/orange m.Colors/blue))
+                                      .borderRadius (m.BorderRadius/circular 4.0))
+         .child
+         (m/Column
+          .mainAxisSize m.MainAxisSize/min
+          .children
+          [(m/Row
+            .mainAxisSize m.MainAxisSize/min
+            .children (map-indexed #(candidate-item %1 %2 is-suffix?) display-cands))
+           (m/Text (str (inc page-index) "/" (ctrl/total-pages state)) .style (m/TextStyle .fontSize 10.0))]))))
+      (m/Positioned .child (m/SizedBox.shrink)))))
+
+(defn ime-global-wrapper [child]
+  (f/widget
+   :watch [state ctrl/!ime-state]
+   (m/Stack .children [child (candidates-overlay state)])))

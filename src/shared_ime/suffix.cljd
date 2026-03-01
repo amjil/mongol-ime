@@ -1,0 +1,61 @@
+(ns shared-ime.suffix
+  (:require
+   ["package:mongol_code/mongol_code.dart" :as code]
+   [clojure.string :as str]))
+
+;; 1800-18AF 是标准蒙古文区间，补充 180E (MVS) 等
+(defn- is-mongolian? [char-code]
+  (or (and (>= char-code 0x1800) (<= char-code 0x18AF))
+      (= char-code 0x202F) ;; NNBSP
+      (= char-code 0x180E))) ;; MVS
+
+(defn get-gender [word]
+  (let [masculine #{\u1820 \u1823 \u1824}
+        feminine #{\u1821 \u1825 \u1826}]
+    (loop [chars (reverse (seq word))]
+      (if (empty? chars)
+        code/Gender.masculine
+        (let [c (first chars)]
+          (cond 
+            (contains? masculine c) code/Gender.masculine
+            (contains? feminine c) code/Gender.feminine
+            :else (recur (rest chars))))))))
+
+(defn get-last-word [text]
+  (if (str/blank? text)
+    ""
+    ;; 增加对各种空白符的兼容
+    (let [parts (str/split (str/trimr text) #"[\s\n\u202F\u180E]+")]
+      (or (last parts) ""))))
+
+(defn get-candidates [text]
+  (let [last-word (get-last-word text)]
+    ;; 🔍 调试打印
+    (dart:core/print (str "[Suffix Debug] Full context: '" text "'"))
+    (dart:core/print (str "[Suffix Debug] Last word detected: '" last-word "'"))
+    
+    (if (or (empty? last-word) 
+            (not (is-mongolian? (int (last last-word)))))
+      (do 
+        (dart:core/print "[Suffix Debug] No valid Mongolian word found before caret.")
+        []) 
+      (let [gender (get-gender last-word)
+            last-char-code (int (last last-word))]
+        (dart:core/print (str "[Suffix Debug] Gender: " gender " Last Char Code: " last-char-code))
+        (let [res (->> [(code.Suffix/yinUnU gender last-char-code)
+                        (code.Suffix/tuDu gender last-char-code)
+                        (code.Suffix/taganDagan gender last-char-code)
+                        (code.Suffix/taqiDaqi gender last-char-code)
+                        (code.Suffix/yiI last-char-code)
+                        (code.Suffix/barIyar gender last-char-code)
+                        (code.Suffix/banIyan gender last-char-code)
+                        (code.Suffix/achaEche gender)
+                        (code.Suffix/taiTei gender)
+                        (code.Suffix/uu gender)
+                        (code.Suffix/ud gender)
+                        (code.Suffix/suffixNugud gender)
+                        (code.Suffix/suffixChu gender)]
+                       (remove nil?)
+                       vec)]
+          (dart:core/print (str "[Suffix Debug] Candidates found: " (count res)))
+          res)))))

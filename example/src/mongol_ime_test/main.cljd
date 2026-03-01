@@ -1,70 +1,88 @@
 (ns mongol-ime-test.main
   (:require
    ["package:flutter/material.dart" :as m]
-   [mongol-ime.host :as host]
-   [mongol-ime.toggle :as toggle]
-   [cljd.flutter :as f]))
+   ["package:mongol/mongol.dart" :as mongol]
+   [cljd.flutter :as f]
+   [shared-ime.controller :as ctrl]
+   [shared-ime.fst-reader :as fst]
+   [shared-ime.overlay-view :as overlay]))
+
+(defonce editor-key (m/GlobalKey.))
+
+(defn mongol-ime-field []
+  (f/widget
+   :managed [controller (m/TextEditingController.)
+             ;; 🔑 核心修复：使用 as-> 给新创建的节点绑定一个临时符号 n，完美解决自引用报错！
+             focus-node (as-> (m/FocusNode
+                               .onKeyEvent (fn [node event] (ctrl/handle-key-event event))) n
+                          (doto n
+                            (.addListener
+                             (fn []
+                               ;; 此时安全使用临时符号 n
+                               (if (.-hasFocus n)
+                                 ;; 焦点进入：注册 IME
+                                 (ctrl/register-client!
+                                  {:replace-text!
+                                   (fn [delete-len insert-str]
+                                     (let [val (.-value controller)
+                                           text (.-text val)
+                                           sel (.-selection val)
+                                           offset (max 0 (.-extentOffset sel))
+                                           start-idx (max 0 (- offset delete-len))
+                                           new-text (str (subs text 0 start-idx) insert-str (subs text offset))]
+                                       (set! (.-value controller)
+                                             (m/TextEditingValue.
+                                              .text new-text
+                                              .selection (m/TextSelection.collapsed .offset (+ start-idx (count insert-str)))))))
+
+                                   :update-caret!
+                                   (fn []
+                                     (when-let [ctx (.-currentContext editor-key)]
+                                       (let [^m/RenderBox rb (.findRenderObject ctx)
+                                             global-offset (.localToGlobal rb m.Offset/zero)]
+                                         (swap! ctrl/!ime-state assoc :caret-offset global-offset))))
+
+                                   :get-context-text!
+                                   (fn []
+                                     (let [val (.-value controller)
+                                           text (.-text val)
+                                           sel (.-selection val)
+                                           start-idx (max 0 (.-start sel))]
+                                       (subs text 0 start-idx)))})
+                                 ;; 焦点离开：注销 IME
+                                 (ctrl/unregister-client!))))))]
+
+   ;; 监听文本框值的改变，实时刷新光标和候选框位置
+   :bg-watcher ([^m/TextEditingValue val controller]
+                (when-let [update-fn (:update-caret! @ctrl/!active-client)]
+                  (update-fn)))
+
+   (m/Center
+    .child
+    (m/Container
+     .width 320.0 .height 400.0 .padding (m.EdgeInsets/all 16.0)
+     .decoration (m/BoxDecoration .color m.Colors/white
+                                  .border (m/Border.all .color m.Colors/grey .width 2.0)
+                                  .borderRadius (m/BorderRadius.circular 8.0))
+     .child
+     (mongol/MongolTextField
+      .key editor-key
+      .controller controller
+      .focusNode focus-node
+      .maxLines nil
+      .style (m/TextStyle .fontSize 20.0 .color m.Colors/black)
+      .decoration (m/InputDecoration .hintText "点击此处开始输入..."
+                                     .filled true
+                                     .fillColor (m.Colors/grey 50)
+                                     .border m.InputBorder/none))))))
 
 (defn main []
   (m.WidgetsFlutterBinding/ensureInitialized)
-
-  (let [ime-enabled (atom true)
-        text-controller (m/TextEditingController.)]
-    (f/run
-     (f/widget
-      (m/MaterialApp
-       .title "蒙古文输入法"
-       .debugShowCheckedModeBanner false
-       .home (m/Scaffold
-              .appBar (m/AppBar
-                       .title (m/Text "蒙古文输入法演示"))
-              .body (m/Stack
-                     .children
-                     [(host/mongol-ime-host
-                       {:enabled? @ime-enabled
-                        :text-controller text-controller
-                        :child (m/Center
-                                .child (m/Padding
-                                        .padding (m/EdgeInsets.all 32)
-                                        .child (m/Column
-                                                .mainAxisAlignment m.MainAxisAlignment/center
-                                                .children
-                                                [(m/Text
-                                                  "请输入蒙古文（输入 a-z 字母）"
-                                                  .style (m/TextStyle .fontSize 16))
-                                                 (m/SizedBox .height 16)
-                                                 (m/TextField
-                                                  .controller text-controller
-                                                  .decoration (m/InputDecoration
-                                                               .labelText "输入框"
-                                                               .hintText "输入 a-z 字母生成候选词"
-                                                               .border (m/OutlineInputBorder))
-                                                  .maxLines 5
-                                                  .minLines 3)
-                                                 (m/SizedBox .height 16)
-                                                 (m/Text
-                                                  "操作说明："
-                                                  .style (m/TextStyle .fontSize 14 .fontWeight m.FontWeight/bold))
-                                                 (m/Text
-                                                  "• 输入 a-z 字母生成候选词"
-                                                  .style (m/TextStyle .fontSize 12))
-                                                 (m/Text
-                                                  "• 数字 1-9 选择候选词"
-                                                  .style (m/TextStyle .fontSize 12))
-                                                 (m/Text
-                                                  "• ↑↓ 切换候选"
-                                                  .style (m/TextStyle .fontSize 12))
-                                                 (m/Text
-                                                  "• ←→ 翻页"
-                                                  .style (m/TextStyle .fontSize 12))
-                                                 (m/Text
-                                                  "• Space/Enter 提交"
-                                                  .style (m/TextStyle .fontSize 12))
-                                                 (m/Text
-                                                  "• Esc 取消"
-                                                  .style (m/TextStyle .fontSize 12))])))})
-                      (toggle/ime-toggle
-                       {:enabled? @ime-enabled
-                        :on-toggle (fn []
-                                     (swap! ime-enabled not))})])))))))
-
+  (fst/ensure-loaded)
+  (f/run
+   (m/MaterialApp
+    .theme (m/ThemeData .useMaterial3 true 
+                        .colorScheme (m/ColorScheme.fromSeed .seedColor m.Colors/blue)
+                        .fontFamily "OyunQaganTig")
+    .home (m/Scaffold .backgroundColor (m.Colors/grey 200)
+                      .body (m/SafeArea .child (overlay/ime-global-wrapper (mongol-ime-field)))))))

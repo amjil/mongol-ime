@@ -19,7 +19,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 version: 1.0.0+1
 
 environment:
-  sdk: ^3.10.1
+  sdk: ^3.10.4
 
 # Dependencies specify other packages that your package needs in order to work.
 # To automatically upgrade your package dependencies to the latest versions
@@ -34,7 +34,7 @@ dependencies:
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
-  mongol: ^9.0.0
+  mongol: ^9.2.1
   mongol_code: ^1.0.4
 
 dev_dependencies:
@@ -63,6 +63,23 @@ flutter:
   # assets:
   #   - images/a_dot_burr.jpeg
   #   - images/a_dot_ham.jpeg
+  assets:
+    - assets/fonts/OyunQaganTig.ttf
+    - assets/fonts/OyunAgulaTig.ttf
+    - assets/fonts/OyunGarbiqimelTig.ttf
+    - assets/fonts/OyunGarqagTig.ttf
+    - assets/fonts/OyunGurbanUlusTig.ttf
+    - assets/fonts/OyunHaraTig.ttf
+    - assets/fonts/OyunHawangTig.ttf
+    - assets/fonts/OyunSoninTig.ttf
+    - assets/next.zip
+    - assets/fst/dict.bin
+    - assets/fst/dict.idx
+    - assets/fst/keys.json
+    - assets/fst/lists.bin
+    - assets/fst/lists.idx
+    - assets/fst/words.fst
+    - assets/fst/token_table.bin
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images
@@ -87,5 +104,30 @@ flutter:
   #       - asset: fonts/TrajanPro_Bold.ttf
   #         weight: 700
   #
+  fonts:
+    - family: OyunQaganTig
+      fonts:
+        - asset: assets/fonts/OyunQaganTig.ttf
+    - family: OyunAgulaTig
+      fonts:
+        - asset: assets/fonts/OyunAgulaTig.ttf
+    - family: OyunGarbiqimelTig
+      fonts:
+        - asset: assets/fonts/OyunGarbiqimelTig.ttf
+    - family: OyunGarqagTig
+      fonts:
+        - asset: assets/fonts/OyunGarqagTig.ttf
+    - family: OyunGurbanUlusTig
+      fonts:
+        - asset: assets/fonts/OyunGurbanUlusTig.ttf
+    - family: OyunHaraTig
+      fonts:
+        - asset: assets/fonts/OyunHaraTig.ttf
+    - family: OyunHawangTig
+      fonts:
+        - asset: assets/fonts/OyunHawangTig.ttf
+    - family: OyunSoninTig
+      fonts:
+        - asset: assets/fonts/OyunSoninTig.ttf
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package

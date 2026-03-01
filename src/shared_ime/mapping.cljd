@@ -1,0 +1,22 @@
+(ns shared-ime.mapping
+  (:require ["dart:core" :as dc]))
+
+;; 基础映射表：a-z/A-Z 对应蒙古文 Unicode
+;; 注意：这里只是示例，请根据你的 FST 词库实际索引进行调整
+(def latin->mongol-map
+  {"a" "\u1820" "e" "\u1821" "i" "\u1822" "o" "\u1823" "u" "\u1824"
+   "v" "\u1825" "f" "\u1826" "n" "\u1828" "b" "\u182a" "p" "\u182b"
+   "h" "\u182c" "g" "\u182d" "m" "\u182e" "l" "\u182f" "s" "\u1830"
+   "x" "\u1831" "t" "\u1832" "d" "\u1833" "q" "\u1834" "j" "\u1835"
+   "y" "\u1836" "r" "\u1837" "w" "\u1838"
+   ;; 大写字母映射示例（如果需要）
+   "A" "\u1820" "G" "\u182d" "H" "\u182c"})
+
+(defn translate
+  "将用户输入的 Latin 字符串转换为蒙古文检索串"
+  [latin-str]
+  (let [sb (dc/StringBuffer.)]
+    (doseq [ch (seq latin-str)]
+      (let [m-char (get latin->mongol-map (str ch) (str ch))]
+        (.write sb m-char)))
+    (.toString sb)))

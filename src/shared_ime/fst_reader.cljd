@@ -1,0 +1,150 @@
+(ns shared-ime.fst-reader
+  (:require
+   ["dart:typed_data" :as u]
+   ["dart:convert" :as convert]
+   ["package:flutter/services.dart" :refer [rootBundle]]))
+
+;; ==========================================
+;; 1️⃣ 基础工具函数 (字节读取)
+;; ==========================================
+
+(defn read-u32 [^u/ByteData buf offset]
+  (.getUint32 buf offset u.Endian/little))
+
+(defn read-u64 [^u/ByteData buf offset]
+  (.getUint64 buf offset u.Endian/little))
+
+;; ==========================================
+;; 2️⃣ 解析 Token 映射表
+;; ==========================================
+
+(defn ^:async load-token-table [path]
+  (let [byte-data (await (.load rootBundle path))
+        count (read-u32 byte-data 0)
+        tokens (loop [i 0 acc []]
+                 (if (< i count)
+                   (recur (inc i) (conj acc (char (read-u32 byte-data (+ 4 (* i 4))))))
+                   acc))]
+    {:tokens tokens
+     :token->char (into {} (map vector (range 0 count) tokens))}))
+
+;; ==========================================
+;; 3️⃣ 字典解析 (Dict: word-id -> 真实字符串)
+;; ==========================================
+
+(defn ^:async load-dict [bin-path idx-path]
+  (let [bin-data (await (.load rootBundle bin-path))
+        idx-data (await (.load rootBundle idx-path))
+        count (/ (.-lengthInBytes idx-data) 8)]
+    {:bin bin-data :idx idx-data :count count}))
+
+(defn dict-get-word [dict word-id token->char]
+  (let [offset (read-u64 (:idx dict) (* 8 word-id))
+        len (read-u32 (:bin dict) offset)
+        bin-uint8 (.asUint8List (.-buffer ^u/ByteData (:bin dict)))
+        bytes (.sublist bin-uint8 (+ offset 4) (+ offset 4 len))
+        sb (dart:core/StringBuffer.)]
+    (doseq [b bytes]
+      (.write sb (get token->char b "?")))
+    (.toString sb)))
+
+;; ==========================================
+;; 4️⃣ 列表解析 (Lists: key-id -> word-ids)
+;; ==========================================
+
+(defn ^:async load-lists [bin-path idx-path]
+  (let [bin-data (await (.load rootBundle bin-path))
+        idx-data (await (.load rootBundle idx-path))
+        count (/ (.-lengthInBytes idx-data) 8)]
+    {:bin bin-data :idx idx-data :count count}))
+
+(defn lists-get-word-ids [lists key-id]
+  (let [offset (read-u64 (:idx lists) (* 8 key-id))
+        count (read-u32 (:bin lists) offset)
+        word-ids (vec (for [i (range count)]
+                        (read-u32 (:bin lists) (+ offset 4 (* i 4)))))]
+    word-ids))
+
+;; ==========================================
+;; 5️⃣ 键值映射 (Keys: 拼音字符串 -> key-id)
+;; ==========================================
+
+(defn ^:async load-keys [path]
+  (let [str-data (await (.loadString rootBundle path))
+        m (convert/jsonDecode str-data)]
+    ;; 将 JSON 解析出来的 value 强制转为整型 ID
+    (into {} (map (fn [[k v]] [k (int v)]) m))))
+
+(defn keys-get-id [keys-map key]
+  (get keys-map key))
+
+;; ==========================================
+;; 6️⃣ LRU 缓存机制 (极速查询保障)
+;; ==========================================
+
+(defonce max-cache-size 1000)
+
+;; 缓存结构: {:map {"pinyin" ["词1" "词2"]}, :order ["pinyin1" "pinyin2"]}
+(defonce lru-cache (atom {:map {} :order []}))
+
+(defn lru-get [key]
+  (let [{:keys [map]} @lru-cache
+        value (get map key)]
+    (when value
+      ;; 刷新访问顺序，把最新访问的放到末尾
+      (swap! lru-cache update :order
+             (fn [o] (-> (remove #(= % key) o) vec (conj key)))))
+    value))
+
+(defn lru-put [key value]
+  (swap! lru-cache
+         (fn [{:keys [map order]}]
+           (let [new-map (assoc map key value)
+                 new-order (conj (vec (remove #(= % key) order)) key)]
+             ;; 超出容量则移除最早放入的（头部的元素）
+             (if (> (count new-order) max-cache-size)
+               (let [oldest (first new-order)]
+                 {:map (dissoc new-map oldest)
+                  :order (vec (rest new-order))})
+               {:map new-map :order new-order})))))
+
+;; ==========================================
+;; 7️⃣ 顶层查询逻辑
+;; ==========================================
+
+(defn get-candidates [key keys-map lists dict token-table]
+  (if-let [cached (lru-get key)]
+    cached
+    (let [key-id (keys-get-id keys-map key)]
+      (if (nil? key-id)
+        []
+        (let [word-ids (lists-get-word-ids lists key-id)
+              token->char (:token->char token-table)
+              candidates (vec (map #(dict-get-word dict % token->char) word-ids))]
+          (lru-put key candidates)
+          candidates)))))
+
+;; ==========================================
+;; 8️⃣ 全局实例与异步初始化
+;; ==========================================
+
+(defonce !token-table (atom nil))
+(defonce !dict (atom nil))
+(defonce !lists (atom nil))
+(defonce !keys-map (atom nil))
+
+(defn ^:async ensure-loaded []
+  (when (nil? @!token-table)
+    (reset! !token-table (await (load-token-table "assets/fst/token_table.bin"))))
+  (when (nil? @!dict)
+    (reset! !dict (await (load-dict "assets/fst/dict.bin" "assets/fst/dict.idx"))))
+  (when (nil? @!lists)
+    (reset! !lists (await (load-lists "assets/fst/lists.bin" "assets/fst/lists.idx"))))
+  (when (nil? @!keys-map)
+    (reset! !keys-map (await (load-keys "assets/fst/keys.json")))))
+
+(defn ^:async get-candidates-async [key]
+  ;; 确保资源已经全部加载到内存
+  (await (ensure-loaded))
+  ;; 执行极速查询
+  (get-candidates key @!keys-map @!lists @!dict @!token-table))

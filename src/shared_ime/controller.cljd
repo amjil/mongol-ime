@@ -1,0 +1,181 @@
+(ns shared-ime.controller
+  (:require
+   ["package:flutter/material.dart" :as m]
+   ["package:flutter/services.dart" :as s]
+   [shared-ime.fst-reader :as fst]
+   [shared-ime.mapping :as mapping]
+   [shared-ime.suffix :as suffix]))
+
+;; ==========================================
+;; 全局状态定义
+;; ==========================================
+(defonce !active-client (atom nil))
+
+(defonce !ime-state
+  (atom {:enabled? true
+         :buffer ""
+         :preview-len 0
+         :candidates []
+         :page-index 0
+         :page-size 5
+         :caret-offset nil}))
+
+;; ==========================================
+;; 工具与分页计算
+;; ==========================================
+(defn total-pages [state]
+  (let [c (count (:candidates state))
+        ps (:page-size state)]
+    (if (zero? c) 0 (.ceil (/ c ps)))))
+
+(defn- get-current-page-word [state]
+  (let [{:keys [candidates page-index page-size]} state]
+    (get candidates (* page-index page-size))))
+
+;; ==========================================
+;; 核心输入法引擎逻辑
+;; ==========================================
+(defn- query-candidates! [buffer]
+  (if (empty? buffer)
+    ;; buffer 为空，触发后缀联想
+    (if-let [client @!active-client]
+      (if-let [get-ctx (:get-context-text! client)]
+        (let [ctx-text (get-ctx)
+              suffix-list (suffix/get-candidates ctx-text)]
+          (swap! !ime-state assoc :candidates suffix-list :page-index 0))
+        (swap! !ime-state assoc :candidates [] :page-index 0))
+      (swap! !ime-state assoc :candidates [] :page-index 0))
+    ;; buffer 有拼音，触发 FST 查词
+    (let [mongol-key (mapping/translate buffer)]
+      (-> (fst/get-candidates-async mongol-key)
+          (.then (fn [cands] (swap! !ime-state assoc :candidates cands :page-index 0)))))))
+
+(defn- update-editor-preview! [new-buffer]
+  "实时内联预览：使用原子替换接口确保绝对不丢字"
+  (when-let [client @!active-client]
+    (let [{:keys [preview-len]} @!ime-state
+          mongol-preview (mapping/translate new-buffer)]
+      (when-let [f (:replace-text! client)]
+        (f preview-len mongol-preview))
+      (swap! !ime-state assoc :preview-len (count mongol-preview)))))
+
+(defn commit-text! [text]
+  "选词上屏：提交确定的蒙古文"
+  (when-let [client @!active-client]
+    (let [{:keys [buffer preview-len]} @!ime-state
+          ;; 纯后缀模式下自动补充窄不换行空格 (NNBSP)
+          final-text (if (empty? buffer) (str "\u202F" text) text)]
+      (when-let [f (:replace-text! client)]
+        (f preview-len final-text))
+      (swap! !ime-state assoc :buffer "" :preview-len 0 :candidates [] :page-index 0)
+      ;; 提交完单词后自动刷新后缀候选
+      (query-candidates! ""))))
+
+;; ==========================================
+;; 键盘事件分发器
+;; ==========================================
+(defn handle-key-event [^s/KeyEvent event]
+  (if-not (dart/is? event s/KeyDownEvent)
+    m/KeyEventResult.ignored
+    (let [{:keys [enabled? buffer candidates page-index page-size]} @!ime-state
+          logical-key (.-logicalKey event)
+          char-str (.-character event)
+          hk s/HardwareKeyboard.instance
+          ctrl? (or (.isLogicalKeyPressed hk s/LogicalKeyboardKey.controlLeft)
+                    (.isLogicalKeyPressed hk s/LogicalKeyboardKey.metaLeft))
+          shift? (or (.isLogicalKeyPressed hk s/LogicalKeyboardKey.shiftLeft)
+                     (.isLogicalKeyPressed hk s/LogicalKeyboardKey.shiftRight))]
+
+      (cond
+        ;; 1. 快捷键：Ctrl + Space 切换输入法中/蒙状态
+        (and ctrl? (= logical-key s/LogicalKeyboardKey.space))
+        (do (swap! !ime-state update :enabled? not) m/KeyEventResult.handled)
+
+        ;; 2. 快捷键：Shift + - (下划线) 手动唤醒后缀
+        (or (and shift? (= logical-key s/LogicalKeyboardKey.minus))
+            (= logical-key s/LogicalKeyboardKey.underscore))
+        (do (query-candidates! "") m/KeyEventResult.handled)
+
+        ;; 如果输入法未开启或客户端失焦，直接放行系统原生按键
+        (or (not enabled?) (nil? @!active-client)) m/KeyEventResult.ignored
+
+        ;; 3. ESC：撤销当前输入框内的预览，关闭所有悬浮窗
+        (= logical-key s/LogicalKeyboardKey.escape)
+        (if (or (seq buffer) (seq candidates))
+          (do (when-let [f (:replace-text! @!active-client)]
+                (f (:preview-len @!ime-state) ""))
+              (swap! !ime-state assoc :buffer "" :preview-len 0 :candidates [] :page-index 0)
+              m/KeyEventResult.handled)
+          m/KeyEventResult.ignored)
+
+        ;; 4. 字母输入：进入打字状态
+        (and char-str (re-matches #"[a-zA-Z]" char-str))
+        (let [nb (str buffer (.toLowerCase char-str))]
+          (swap! !ime-state assoc :buffer nb :page-index 0)
+          (update-editor-preview! nb)
+          (query-candidates! nb)
+          m/KeyEventResult.handled)
+
+        ;; 5. 退格键
+        (= logical-key s/LogicalKeyboardKey.backspace)
+        (if (seq buffer)
+          ;; 有拼音时：删掉一个拼音字母，并重新翻译预览
+          (let [nb (subs buffer 0 (dec (count buffer)))]
+            (swap! !ime-state assoc :buffer nb :page-index 0)
+            (update-editor-preview! nb)
+            (query-candidates! nb)
+            m/KeyEventResult.handled)
+          ;; 无拼音但在选后缀时：关闭候选框，并把退格键还给原生 Flutter 去删除正文
+          (if (seq candidates)
+            (do
+              (swap! !ime-state assoc :candidates [] :page-index 0)
+              m/KeyEventResult.ignored)
+            m/KeyEventResult.ignored))
+
+        ;; 6. 空格键：将第一候选词上屏
+        (= logical-key s/LogicalKeyboardKey.space)
+        (if (seq buffer)
+          (do (commit-text! (or (get-current-page-word @!ime-state) (mapping/translate buffer)))
+              m/KeyEventResult.handled)
+          m/KeyEventResult.ignored)
+
+        ;; 7. 数字键选词 (1-5)
+        (and char-str (re-matches #"[1-5]" char-str))
+        (if (or (seq buffer) (seq candidates))
+          (let [idx (+ (* page-index page-size) (dec (int/parse char-str)))]
+            (when-let [w (get candidates idx)] (commit-text! w))
+            m/KeyEventResult.handled)
+          m/KeyEventResult.ignored)
+
+        ;; 8. 翻页：= 或 + 键 (下一页) -> 只要有候选词就能翻
+        (and (or (seq buffer) (seq candidates))
+             (or (= logical-key s/LogicalKeyboardKey.equal) (= char-str "=") (= char-str "+")))
+        (do
+          (swap! !ime-state (fn [s]
+                              (if (< (:page-index s) (dec (total-pages s)))
+                                (update s :page-index inc)
+                                s)))
+          m/KeyEventResult.handled)
+
+        ;; 9. 翻页：- 键 (上一页) -> 注意避开 Shift（Shift + - 是唤醒后缀）
+        (and (or (seq buffer) (seq candidates))
+             (not shift?)
+             (or (= logical-key s/LogicalKeyboardKey.minus) (= char-str "-")))
+        (do
+          (swap! !ime-state (fn [s]
+                              (if (> (:page-index s) 0)
+                                (update s :page-index dec)
+                                s)))
+          m/KeyEventResult.handled)
+
+        :else m/KeyEventResult.ignored))))
+
+;; ==========================================
+;; 客户端生命周期注册
+;; ==========================================
+(defn register-client! [client]
+  (reset! !active-client client))
+
+(defn unregister-client! []
+  (reset! !active-client nil)
+  (swap! !ime-state assoc :buffer "" :preview-len 0 :candidates [] :page-index 0))
