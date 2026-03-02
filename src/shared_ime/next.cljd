@@ -1,0 +1,22 @@
+(ns shared-ime.next
+  (:require
+   ["dart:core" :as dc]
+   [clojure.string :as str]
+   [shared-ime.zip-utils :as zip-utils]))
+
+;; Global state for prediction dictionary
+(defonce !next-dict (atom {}))
+
+(defn ^:async ensure-loaded []
+  "Preload prediction dictionary on startup"
+  (zip-utils/load-assets-parallel [[!next-dict "assets/next.zip"]]))
+
+(defn get-predictions [prev-word]
+  "Get prediction candidates based on previous word"
+  (if-let [raw-preds (get @!next-dict prev-word)]
+    ;; Extract and filter first element of nested lists
+    (->> raw-preds
+         (filter #(not (nil? (first %))))
+         (map first)
+         (vec))
+    []))

@@ -5,7 +5,8 @@
    [cljd.flutter :as f]
    [shared-ime.controller :as ctrl]
    [shared-ime.fst-reader :as fst]
-   [shared-ime.overlay-view :as overlay]))
+   [shared-ime.overlay-view :as overlay]
+   [shared-ime.next :as next]))
 
 (defonce editor-key (m/GlobalKey.))
 
@@ -78,6 +79,7 @@
 (defn main []
   (m.WidgetsFlutterBinding/ensureInitialized)
   (fst/ensure-loaded)
+  (next/ensure-loaded)
   (f/run
    (m/MaterialApp
     .theme (m/ThemeData .useMaterial3 true 

@@ -2,29 +2,31 @@
   (:require
    ["package:flutter/material.dart" :as m]
    ["package:flutter/services.dart" :as s]
+   [clojure.string :as str]
    [shared-ime.fst-reader :as fst]
    [shared-ime.mapping :as mapping]
-   [shared-ime.suffix :as suffix]))
+   [shared-ime.suffix :as suffix]
+   [shared-ime.next :as next-word]))
 
 ;; ==========================================
-;; Global state
+;; Global State Definition
 ;; ==========================================
 (defonce !active-client (atom nil))
 
 (defonce !ime-state
-  (atom {:enabled? true
-         :buffer ""
-         :preview-len 0
-         :candidates []
-         :page-index 0
-         :page-size 5
+  (atom {:enabled? true 
+         :buffer "" 
+         :preview-len 0 
+         :candidates [] 
+         :page-index 0 
+         :page-size 5 
          :caret-offset nil}))
 
 ;; ==========================================
-;; Utilities and pagination
+;; Utilities & Pagination
 ;; ==========================================
 (defn total-pages [state]
-  (let [c (count (:candidates state))
+  (let [c (count (:candidates state)) 
         ps (:page-size state)]
     (if (zero? c) 0 (.ceil (/ c ps)))))
 
@@ -33,25 +35,47 @@
     (get candidates (* page-index page-size))))
 
 ;; ==========================================
-;; Core IME engine logic
+;; Core IME Engine Logic
 ;; ==========================================
-(defn- query-candidates! [buffer]
-  (if (empty? buffer)
-    ;; Empty buffer: trigger suffix suggestions
+(defn- query-candidates! 
+  "Determine what to query based on trigger-mode.
+   Supported modes: :typing (Pinyin query) | :commit (Next Word prediction) | :manual-suffix (Grammatical suffixes)"
+  [buffer trigger-mode]
+  (case trigger-mode
+    ;; Mode 1: Normal Pinyin typing, query FST dictionary
+    :typing
+    (if (empty? buffer)
+      (swap! !ime-state assoc :candidates [] :page-index 0)
+      (let [mongol-key (mapping/translate buffer)]
+        (-> (fst/get-candidates-async mongol-key)
+            (.then (fn [cands] (swap! !ime-state assoc :candidates cands :page-index 0))))))
+
+    ;; Mode 2: Auto-triggered after commit (Next Word prediction only)
+    :commit
+    (if-let [client @!active-client]
+      (if-let [get-ctx (:get-context-text! client)]
+        (let [ctx-text (get-ctx)
+              ;; Extract the last word before the caret
+              last-word (last (str/split (str/trimr ctx-text) #"[\s\u202F]+"))
+              next-words (if last-word (next-word/get-predictions last-word) [])
+              ;; Add a space prefix to predictions for UI distinction and auto-spacing on commit
+              formatted-next (map #(str " " %) next-words)]
+          (swap! !ime-state assoc :candidates (vec formatted-next) :page-index 0))
+        (swap! !ime-state assoc :candidates [] :page-index 0))
+      (swap! !ime-state assoc :candidates [] :page-index 0))
+
+    ;; Mode 3: Manually triggered by Shift + - (Suffixes only)
+    :manual-suffix
     (if-let [client @!active-client]
       (if-let [get-ctx (:get-context-text! client)]
         (let [ctx-text (get-ctx)
               suffix-list (suffix/get-candidates ctx-text)]
-          (swap! !ime-state assoc :candidates suffix-list :page-index 0))
+          (swap! !ime-state assoc :candidates (vec suffix-list) :page-index 0))
         (swap! !ime-state assoc :candidates [] :page-index 0))
-      (swap! !ime-state assoc :candidates [] :page-index 0))
-    ;; Buffer has pinyin: query FST for candidates
-    (let [mongol-key (mapping/translate buffer)]
-      (-> (fst/get-candidates-async mongol-key)
-          (.then (fn [cands] (swap! !ime-state assoc :candidates cands :page-index 0)))))))
+      (swap! !ime-state assoc :candidates [] :page-index 0))))
 
 (defn- update-editor-preview! [new-buffer]
-  "Inline preview: atomic replace to avoid losing characters"
+  "Real-time inline preview: Use atomic replace-text! to prevent dropped characters"
   (when-let [client @!active-client]
     (let [{:keys [preview-len]} @!ime-state
           mongol-preview (mapping/translate new-buffer)]
@@ -60,19 +84,23 @@
       (swap! !ime-state assoc :preview-len (count mongol-preview)))))
 
 (defn commit-text! [text]
-  "Commit selected word: send final Mongol text to editor"
+  "Commit text: Insert the selected Mongolian word"
   (when-let [client @!active-client]
     (let [{:keys [buffer preview-len]} @!ime-state
-          ;; In suffix-only mode, prepend narrow no-break space (NNBSP)
-          final-text (if (empty? buffer) (str "\u202F" text) text)]
+          ;; Commit logic branches:
+          final-text (if (empty? buffer)
+                       (if (str/starts-with? text " ")
+                         text             ;; Next Word: comes with a regular space, use as is
+                         (str "\u202F" text)) ;; Pure Suffix: prepend NNBSP (\u202F)
+                       text)]             ;; Normal Pinyin: commit directly
       (when-let [f (:replace-text! client)]
         (f preview-len final-text))
       (swap! !ime-state assoc :buffer "" :preview-len 0 :candidates [] :page-index 0)
-      ;; Refresh suffix candidates after commit
-      (query-candidates! ""))))
+      ;; Auto-trigger Next Word prediction after commit
+      (query-candidates! "" :commit))))
 
 ;; ==========================================
-;; Key event dispatcher
+;; Keyboard Event Dispatcher
 ;; ==========================================
 (defn handle-key-event [^s/KeyEvent event]
   (if-not (dart/is? event s/KeyDownEvent)
@@ -87,19 +115,27 @@
                      (.isLogicalKeyPressed hk s/LogicalKeyboardKey.shiftRight))]
 
       (cond
-        ;; 1. Shortcut: Ctrl+Space toggles IME on/off
+        ;; 1. Shortcut: Ctrl + Space to toggle IME
         (and ctrl? (= logical-key s/LogicalKeyboardKey.space))
         (do (swap! !ime-state update :enabled? not) m/KeyEventResult.handled)
 
-        ;; 2. Shortcut: Shift+- (underscore) to trigger suffix suggestions
+        ;; 2. Shortcut: Shift + - to force trigger grammatical suffixes
         (or (and shift? (= logical-key s/LogicalKeyboardKey.minus))
             (= logical-key s/LogicalKeyboardKey.underscore))
-        (do (query-candidates! "") m/KeyEventResult.handled)
+        (do 
+          ;; If there's uncommitted Pinyin preview, force clear it to avoid mess
+          (when (> (:preview-len @!ime-state) 0)
+            (when-let [f (:replace-text! @!active-client)]
+              (f (:preview-len @!ime-state) "")))
+          (swap! !ime-state assoc :buffer "" :preview-len 0)
+          ;; Manually trigger suffix query mode
+          (query-candidates! "" :manual-suffix) 
+          m/KeyEventResult.handled)
 
-        ;; IME off or no active client: pass through to system
+        ;; Allow native handling if IME is disabled or client lost focus
         (or (not enabled?) (nil? @!active-client)) m/KeyEventResult.ignored
 
-        ;; 3. ESC: cancel preview and close overlay
+        ;; 3. ESC: Clear current preview and close overlays
         (= logical-key s/LogicalKeyboardKey.escape)
         (if (or (seq buffer) (seq candidates))
           (do (when-let [f (:replace-text! @!active-client)]
@@ -108,74 +144,86 @@
               m/KeyEventResult.handled)
           m/KeyEventResult.ignored)
 
-        ;; 4. Letter input: enter typing state
+        ;; 4. Letter input (A-Z)
         (and char-str (re-matches #"[a-zA-Z]" char-str))
         (let [nb (str buffer (.toLowerCase char-str))]
           (swap! !ime-state assoc :buffer nb :page-index 0)
-          (update-editor-preview! nb)
-          (query-candidates! nb)
+          (update-editor-preview! nb) 
+          ;; Trigger Pinyin query mode while typing
+          (query-candidates! nb :typing) 
           m/KeyEventResult.handled)
 
         ;; 5. Backspace
         (= logical-key s/LogicalKeyboardKey.backspace)
         (if (seq buffer)
-          ;; With pinyin: remove one char and refresh preview
           (let [nb (subs buffer 0 (dec (count buffer)))]
             (swap! !ime-state assoc :buffer nb :page-index 0)
-            (update-editor-preview! nb)
-            (query-candidates! nb)
+            (update-editor-preview! nb) 
+            (query-candidates! nb :typing) 
             m/KeyEventResult.handled)
-          ;; No pinyin but candidates open: close candidates, let Flutter handle backspace
           (if (seq candidates)
             (do
               (swap! !ime-state assoc :candidates [] :page-index 0)
               m/KeyEventResult.ignored)
             m/KeyEventResult.ignored))
 
-        ;; 6. Space: commit first candidate
+        ;; 6. Space: Commit the first candidate
         (= logical-key s/LogicalKeyboardKey.space)
         (if (seq buffer)
-          (do (commit-text! (or (get-current-page-word @!ime-state) (mapping/translate buffer)))
+          (do (commit-text! (or (get-current-page-word @!ime-state) (mapping/translate buffer))) 
               m/KeyEventResult.handled)
           m/KeyEventResult.ignored)
 
-        ;; 7. Number keys 1-5: select candidate
+        ;; 7. Number keys (1-5): Select candidate
         (and char-str (re-matches #"[1-5]" char-str))
         (if (or (seq buffer) (seq candidates))
           (let [idx (+ (* page-index page-size) (dec (int/parse char-str)))]
-            (when-let [w (get candidates idx)] (commit-text! w))
+            (when-let [w (get candidates idx)] (commit-text! w)) 
             m/KeyEventResult.handled)
           m/KeyEventResult.ignored)
 
-        ;; 8. Page down: = or + when candidates exist
-        (and (or (seq buffer) (seq candidates))
+        ;; 8. Page Down: = / +
+        (and (or (seq buffer) (seq candidates)) 
              (or (= logical-key s/LogicalKeyboardKey.equal) (= char-str "=") (= char-str "+")))
-        (do
-          (swap! !ime-state (fn [s]
-                              (if (< (:page-index s) (dec (total-pages s)))
-                                (update s :page-index inc)
-                                s)))
+        (do 
+          (swap! !ime-state (fn [s] 
+                              (if (< (:page-index s) (dec (total-pages s))) 
+                                (update s :page-index inc) s)))
           m/KeyEventResult.handled)
 
-        ;; 9. Page up: - (without Shift; Shift+- triggers suffix)
-        (and (or (seq buffer) (seq candidates))
-             (not shift?)
+        ;; 9. Page Up: - (Make sure to avoid Shift)
+        (and (or (seq buffer) (seq candidates)) 
+             (not shift?) 
              (or (= logical-key s/LogicalKeyboardKey.minus) (= char-str "-")))
-        (do
-          (swap! !ime-state (fn [s]
-                              (if (> (:page-index s) 0)
-                                (update s :page-index dec)
-                                s)))
+        (do 
+          (swap! !ime-state (fn [s] 
+                              (if (> (:page-index s) 0) 
+                                (update s :page-index dec) s)))
+          m/KeyEventResult.handled)
+
+        ;; 10. 🔑 Punctuation mapping (, and .)
+        (and char-str (or (= char-str ",") (= char-str ".")))
+        (let [mongol-punct (if (= char-str ",") "᠂" "᠃")]
+          ;; If currently spelling a word, commit the first candidate first
+          (when (seq buffer)
+            (commit-text! (or (get-current-page-word @!ime-state) (mapping/translate buffer))))
+          
+          ;; Insert the Mongolian punctuation
+          (when-let [f (:replace-text! @!active-client)]
+            (f (:preview-len @!ime-state) mongol-punct))
+          
+          ;; Punctuation breaks the sentence/prediction chain, clear everything
+          (swap! !ime-state assoc :buffer "" :preview-len 0 :candidates [] :page-index 0)
           m/KeyEventResult.handled)
 
         :else m/KeyEventResult.ignored))))
 
 ;; ==========================================
-;; Client lifecycle registration
+;; Client Lifecycle Registration
 ;; ==========================================
-(defn register-client! [client]
+(defn register-client! [client] 
   (reset! !active-client client))
 
-(defn unregister-client! []
-  (reset! !active-client nil)
+(defn unregister-client! [] 
+  (reset! !active-client nil) 
   (swap! !ime-state assoc :buffer "" :preview-len 0 :candidates [] :page-index 0))
