@@ -12,15 +12,14 @@
 (defn mongol-ime-field []
   (f/widget
    :managed [controller (m/TextEditingController.)
-             ;; 🔑 核心修复：使用 as-> 给新创建的节点绑定一个临时符号 n，完美解决自引用报错！
+             ;; Use as-> to bind temp symbol n for self-reference in listener
              focus-node (as-> (m/FocusNode
                                .onKeyEvent (fn [node event] (ctrl/handle-key-event event))) n
                           (doto n
                             (.addListener
                              (fn []
-                               ;; 此时安全使用临时符号 n
                                (if (.-hasFocus n)
-                                 ;; 焦点进入：注册 IME
+                                 ;; Focus gained: register IME client
                                  (ctrl/register-client!
                                   {:replace-text!
                                    (fn [delete-len insert-str]
@@ -49,10 +48,10 @@
                                            sel (.-selection val)
                                            start-idx (max 0 (.-start sel))]
                                        (subs text 0 start-idx)))})
-                                 ;; 焦点离开：注销 IME
+                                 ;; Focus lost: unregister IME
                                  (ctrl/unregister-client!))))))]
 
-   ;; 监听文本框值的改变，实时刷新光标和候选框位置
+   ;; Watch text changes to refresh caret and candidate overlay
    :bg-watcher ([^m/TextEditingValue val controller]
                 (when-let [update-fn (:update-caret! @ctrl/!active-client)]
                   (update-fn)))
@@ -71,7 +70,7 @@
       .focusNode focus-node
       .maxLines nil
       .style (m/TextStyle .fontSize 20.0 .color m.Colors/black)
-      .decoration (m/InputDecoration .hintText "点击此处开始输入..."
+      .decoration (m/InputDecoration .hintText "Tap here to start typing..."
                                      .filled true
                                      .fillColor (m.Colors/grey 50)
                                      .border m.InputBorder/none))))))

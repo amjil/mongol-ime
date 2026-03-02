@@ -5,7 +5,7 @@
    ["package:flutter/services.dart" :refer [rootBundle]]))
 
 ;; ==========================================
-;; 1️⃣ 基础工具函数 (字节读取)
+;; 1. Byte-reading helpers
 ;; ==========================================
 
 (defn read-u32 [^u/ByteData buf offset]
@@ -15,7 +15,7 @@
   (.getUint64 buf offset u.Endian/little))
 
 ;; ==========================================
-;; 2️⃣ 解析 Token 映射表
+;; 2. Token mapping table
 ;; ==========================================
 
 (defn ^:async load-token-table [path]
@@ -29,7 +29,7 @@
      :token->char (into {} (map vector (range 0 count) tokens))}))
 
 ;; ==========================================
-;; 3️⃣ 字典解析 (Dict: word-id -> 真实字符串)
+;; 3. Dict: word-id -> string
 ;; ==========================================
 
 (defn ^:async load-dict [bin-path idx-path]
@@ -49,7 +49,7 @@
     (.toString sb)))
 
 ;; ==========================================
-;; 4️⃣ 列表解析 (Lists: key-id -> word-ids)
+;; 4. Lists: key-id -> word-ids
 ;; ==========================================
 
 (defn ^:async load-lists [bin-path idx-path]
@@ -66,32 +66,32 @@
     word-ids))
 
 ;; ==========================================
-;; 5️⃣ 键值映射 (Keys: 拼音字符串 -> key-id)
+;; 5. Keys: pinyin string -> key-id
 ;; ==========================================
 
 (defn ^:async load-keys [path]
   (let [str-data (await (.loadString rootBundle path))
         m (convert/jsonDecode str-data)]
-    ;; 将 JSON 解析出来的 value 强制转为整型 ID
+    ;; Coerce JSON values to int IDs
     (into {} (map (fn [[k v]] [k (int v)]) m))))
 
 (defn keys-get-id [keys-map key]
   (get keys-map key))
 
 ;; ==========================================
-;; 6️⃣ LRU 缓存机制 (极速查询保障)
+;; 6. LRU cache
 ;; ==========================================
 
 (defonce max-cache-size 1000)
 
-;; 缓存结构: {:map {"pinyin" ["词1" "词2"]}, :order ["pinyin1" "pinyin2"]}
+;; {:map {"key" ["word1" "word2"]}, :order ["key1" "key2"]}
 (defonce lru-cache (atom {:map {} :order []}))
 
 (defn lru-get [key]
   (let [{:keys [map]} @lru-cache
         value (get map key)]
     (when value
-      ;; 刷新访问顺序，把最新访问的放到末尾
+      ;; Move accessed key to end of order
       (swap! lru-cache update :order
              (fn [o] (-> (remove #(= % key) o) vec (conj key)))))
     value))
@@ -101,7 +101,7 @@
          (fn [{:keys [map order]}]
            (let [new-map (assoc map key value)
                  new-order (conj (vec (remove #(= % key) order)) key)]
-             ;; 超出容量则移除最早放入的（头部的元素）
+             ;; Evict oldest when over capacity
              (if (> (count new-order) max-cache-size)
                (let [oldest (first new-order)]
                  {:map (dissoc new-map oldest)
@@ -109,7 +109,7 @@
                {:map new-map :order new-order})))))
 
 ;; ==========================================
-;; 7️⃣ 顶层查询逻辑
+;; 7. Top-level query
 ;; ==========================================
 
 (defn get-candidates [key keys-map lists dict token-table]
@@ -125,7 +125,7 @@
           candidates)))))
 
 ;; ==========================================
-;; 8️⃣ 全局实例与异步初始化
+;; 8. Global instances and async init
 ;; ==========================================
 
 (defonce !token-table (atom nil))
@@ -144,7 +144,5 @@
     (reset! !keys-map (await (load-keys "assets/fst/keys.json")))))
 
 (defn ^:async get-candidates-async [key]
-  ;; 确保资源已经全部加载到内存
   (await (ensure-loaded))
-  ;; 执行极速查询
   (get-candidates key @!keys-map @!lists @!dict @!token-table))

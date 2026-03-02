@@ -13,7 +13,7 @@
     .mainAxisSize m.MainAxisSize/min
     .children
     [(m/Text (str (inc idx) ".") .style (m/TextStyle .fontSize 12.0 .color m.Colors/grey))
-     ;; 🔑 直接替换为 MongolText，去掉了 m/Row 和 "-" 符号
+     ;; Use MongolText directly (no m/Row or "-" separator)
      (mongol/MongolText word .style (m/TextStyle .fontSize 26.0 .color m.Colors/black))])))
      
 (defn candidates-overlay [state]
