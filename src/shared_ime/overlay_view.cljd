@@ -11,6 +11,7 @@
    .child
    (m/Column
     .mainAxisSize m.MainAxisSize/min
+    .mainAxisAlignment m.MainAxisAlignment/start
     .children
     [(m/Text (str (inc idx) ".") .style (m/TextStyle .fontSize 12.0 .color m.Colors/grey))
      ;; Use MongolText directly (no m/Row or "-" separator)
@@ -39,6 +40,7 @@
           .children
           [(m/Row
             .mainAxisSize m.MainAxisSize/min
+            .crossAxisAlignment m.CrossAxisAlignment/start
             .children (map-indexed #(candidate-item %1 %2 is-suffix?) display-cands))
            (m/Text (str (inc page-index) "/" (ctrl/total-pages state)) .style (m/TextStyle .fontSize 10.0))]))))
       (m/Positioned .child (m/SizedBox.shrink)))))
