@@ -3,6 +3,7 @@
 Mongolian IME (input method) for Flutter with **hardware keyboard** support, written in [ClojureDart](https://github.com/tensegritics/ClojureDart).
 
 - **Latin → Mongol**: Type Latin letters (a–z), get live Mongol script preview and word candidates from an FST dictionary.
+- **Next-word prediction**: After committing a word, show next-word candidates (from `assets/next.zip`).
 - **Suffix suggestions**: After a Mongol word, get grammatical suffix candidates (e.g. case, possessive).
 - **Single shared engine**: One global IME state; the active text field registers as client and receives input.
 
@@ -29,10 +30,15 @@ m-h-k/
 │   ├── overlay_view.cljd   # Candidate overlay UI
 │   ├── fst_reader.cljd     # FST dict load & query (LRU cache)
 │   ├── mapping.cljd        # Latin → Mongol character mapping
-│   └── suffix.cljd         # Suffix suggestions (mongol_code)
+│   ├── suffix.cljd         # Suffix suggestions (mongol_code)
+│   ├── next.cljd           # Next-word prediction (from next.zip)
+│   └── zip_utils.cljd      # Load JSON from asset ZIP + cache
 ├── example/                 # Flutter app using the IME
 │   ├── src/mongol_ime_test/main.cljd
-│   └── assets/fst/         # FST assets: token_table, dict, lists, keys.json
+│   └── assets/
+│       ├── fst/            # FST assets: token_table, dict.*, lists.*, keys.json, words.fst
+│       ├── next.zip        # Next-word dictionary (JSON packed into a zip)
+│       └── fonts/          # Mongolian fonts (Oyun*)
 ├── deps.edn
 └── README.md
 ```
@@ -49,19 +55,25 @@ clj -M:cljd compile
 cd example && flutter run
 ```
 
-Ensure `example/assets/fst/` contains the FST files (`token_table.bin`, `dict.bin`, `dict.idx`, `lists.bin`, `lists.idx`, `keys.json`). The mapping in `mapping.cljd` should match your FST key encoding.
+Ensure `example/assets/` contains:
+
+- **FST**: `assets/fst/token_table.bin`, `dict.bin`, `dict.idx`, `lists.bin`, `lists.idx`, `keys.json`, `words.fst`
+- **Next-word**: `assets/next.zip`
+- **Fonts**: `assets/fonts/Oyun*.ttf`
+
+The mapping in `mapping.cljd` should match your FST key encoding.
 
 ## Keyboard reference
 
 | Key / combo        | Action                          |
 |--------------------|---------------------------------|
-| **a–z**            | Type pinyin → Mongol preview   |
+| **a–z**            | Type latin → Mongol preview    |
 | **Space**          | Commit first candidate         |
 | **1–5**            | Select candidate by number     |
 | **=** or **+**     | Next page of candidates        |
 | **-** (no Shift)   | Previous page                  |
-| **Shift + -**      | Trigger suffix suggestions     |
-| **Backspace**      | Delete last pinyin char or pass through |
+| **Shift + -** / **_** | Trigger suffix suggestions  |
+| **Backspace**      | Delete last latin buffer char or pass through |
 | **ESC**            | Cancel input, clear overlay    |
 | **Ctrl + Space**   | Toggle IME on/off              |
 
