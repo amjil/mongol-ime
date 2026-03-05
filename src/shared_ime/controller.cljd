@@ -83,16 +83,18 @@
         (f preview-len mongol-preview))
       (swap! !ime-state assoc :preview-len (count mongol-preview)))))
 
-(defn commit-text! [text]
-  "Commit text: Insert the selected Mongolian word"
+(defn commit-text! [text & {:keys [add-space-after?] :or {add-space-after? false}}]
+  "Commit text: Insert the selected Mongolian word.
+   When add-space-after? is true, append a space after the committed text (e.g. after number/space selection)."
   (when-let [client @!active-client]
     (let [{:keys [buffer preview-len]} @!ime-state
           ;; Commit logic branches:
-          final-text (if (empty? buffer)
-                       (if (str/starts-with? text " ")
-                         text             ;; Next Word: comes with a regular space, use as is
-                         (str "\u202F" text)) ;; Pure Suffix: prepend NNBSP (\u202F)
-                       text)]             ;; Normal Pinyin: commit directly
+          base-text (if (empty? buffer)
+                      (if (str/starts-with? text " ")
+                        text             ;; Next Word: comes with a regular space, use as is
+                        (str "\u202F" text)) ;; Pure Suffix: prepend NNBSP (\u202F)
+                      text)              ;; Normal Pinyin: commit directly
+          final-text (if add-space-after? (str base-text " ") base-text)]
       (when-let [f (:replace-text! client)]
         (f preview-len final-text))
       (swap! !ime-state assoc :buffer "" :preview-len 0 :candidates [] :page-index 0)
@@ -167,18 +169,18 @@
               m/KeyEventResult.ignored)
             m/KeyEventResult.ignored))
 
-        ;; 6. Space: Commit the first candidate
+        ;; 6. Space: Commit the first candidate, then add a space
         (= logical-key s/LogicalKeyboardKey.space)
         (if (seq buffer)
-          (do (commit-text! (or (get-current-page-word @!ime-state) (mapping/translate buffer))) 
+          (do (commit-text! (or (get-current-page-word @!ime-state) (mapping/translate buffer)) :add-space-after? true)
               m/KeyEventResult.handled)
           m/KeyEventResult.ignored)
 
-        ;; 7. Number keys (1-5): Select candidate
+        ;; 7. Number keys (1-5): Select candidate, then add a space
         (and char-str (re-matches #"[1-5]" char-str))
         (if (or (seq buffer) (seq candidates))
           (let [idx (+ (* page-index page-size) (dec (int/parse char-str)))]
-            (when-let [w (get candidates idx)] (commit-text! w)) 
+            (when-let [w (get candidates idx)] (commit-text! w :add-space-after? true))
             m/KeyEventResult.handled)
           m/KeyEventResult.ignored)
 

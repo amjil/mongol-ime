@@ -1,18 +1,34 @@
 (ns shared-ime.mapping
   (:require ["dart:core" :as dc]))
 
-;; Base mapping: a-z/A-Z -> Mongolian Unicode (adjust for your FST index)
+;; ==========================================
+;; Latin to Mongolian Unicode Mapping
+;; ==========================================
+;; Base mapping: maps Latin characters to their corresponding 
+;; Mongolian Unicode representations. 
+;; Vowels are explicitly mapped to match standard Mongolian keyboard layouts:
+;; c -> ᠣ (\u1823), v -> ᠤ (\u1824), o -> ᠥ (\u1825), u -> ᠦ (\u1826)
 (def latin->mongol-map
-  {"a" "\u1820" "e" "\u1821" "i" "\u1822" "o" "\u1823" "u" "\u1824"
-   "v" "\u1825" "f" "\u1826" "n" "\u1828" "b" "\u182a" "p" "\u182b"
+  {"a" "\u1820" 
+   "e" "\u1821" 
+   "i" "\u1822" 
+   "c" "\u1823" ;; ᠣ
+   "v" "\u1824" ;; ᠤ
+   "o" "\u1825" ;; ᠥ
+   "u" "\u1826" ;; ᠦ
+   
+   "n" "\u1828" "b" "\u182a" "p" "\u182b"
    "h" "\u182c" "g" "\u182d" "m" "\u182e" "l" "\u182f" "s" "\u1830"
    "x" "\u1831" "t" "\u1832" "d" "\u1833" "q" "\u1834" "j" "\u1835"
    "y" "\u1836" "r" "\u1837" "w" "\u1838"
-   ;; Uppercase (if needed)
+   
+   ;; Uppercase mappings (add more if your input logic requires distinct uppercase handling)
    "A" "\u1820" "G" "\u182d" "H" "\u182c"})
 
 (defn translate
-  "Convert Latin input string to Mongol lookup string"
+  "Translates a Latin input string into a Mongolian lookup string.
+   Iterates through each character, mapping it to its Mongolian Unicode equivalent.
+   If a character is not found in the map, it remains unchanged."
   [latin-str]
   (let [sb (dc/StringBuffer.)]
     (doseq [ch (seq latin-str)]
