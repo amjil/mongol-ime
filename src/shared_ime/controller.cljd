@@ -15,12 +15,16 @@
 
 (defonce !ime-state
   (atom {:enabled? true 
+         :latin-mode? false 
          :buffer "" 
          :preview-len 0 
          :candidates [] 
          :page-index 0 
          :page-size 5 
          :caret-offset nil}))
+
+;; Set when Shift is pressed alone; cleared when any other key is pressed. Toggle latin-mode only on Shift KeyUp when this is true.
+(defonce !shift-alone-pressed (atom false))
 
 ;; ==========================================
 ;; Utilities & Pagination
@@ -74,8 +78,9 @@
         (swap! !ime-state assoc :candidates [] :page-index 0))
       (swap! !ime-state assoc :candidates [] :page-index 0))))
 
-(defn- update-editor-preview! [new-buffer]
+(defn- update-editor-preview! 
   "Real-time inline preview: Use atomic replace-text! to prevent dropped characters"
+  [new-buffer]
   (when-let [client @!active-client]
     (let [{:keys [preview-len]} @!ime-state
           mongol-preview (mapping/translate new-buffer)]
@@ -83,9 +88,10 @@
         (f preview-len mongol-preview))
       (swap! !ime-state assoc :preview-len (count mongol-preview)))))
 
-(defn commit-text! [text & {:keys [add-space-after?] :or {add-space-after? false}}]
+(defn commit-text! 
   "Commit text: Insert the selected Mongolian word.
    When add-space-after? is true, append a space after the committed text (e.g. after number/space selection)."
+  [text & {:keys [add-space-after?] :or {add-space-after? false}}]
   (when-let [client @!active-client]
     (let [{:keys [buffer preview-len]} @!ime-state
           ;; Commit logic branches:
@@ -105,23 +111,49 @@
 ;; Keyboard Event Dispatcher
 ;; ==========================================
 (defn handle-key-event [^s/KeyEvent event]
-  (if-not (dart/is? event s/KeyDownEvent)
+  (cond
+    ;; Shift KeyUp: toggle Latin/Mongol only if Shift was pressed alone (no other key before release)
+    (dart/is? event s/KeyUpEvent)
+    (let [logical-key (.-logicalKey event)]
+      (if (or (= logical-key s/LogicalKeyboardKey.shiftLeft)
+              (= logical-key s/LogicalKeyboardKey.shiftRight))
+        (if @!shift-alone-pressed
+          (do (reset! !shift-alone-pressed false)
+              (swap! !ime-state update :latin-mode? not)
+              m/KeyEventResult.handled)
+          m/KeyEventResult.ignored)
+        m/KeyEventResult.ignored))
+
+    (not (dart/is? event s/KeyDownEvent))
     m/KeyEventResult.ignored
-    (let [{:keys [enabled? buffer candidates page-index page-size]} @!ime-state
+
+    ;; KeyDown from here
+    :else
+    (let [{:keys [enabled? latin-mode? buffer candidates page-index page-size]} @!ime-state
           logical-key (.-logicalKey event)
           char-str (.-character event)
           hk s/HardwareKeyboard.instance
           ctrl? (or (.isLogicalKeyPressed hk s/LogicalKeyboardKey.controlLeft)
                     (.isLogicalKeyPressed hk s/LogicalKeyboardKey.metaLeft))
           shift? (or (.isLogicalKeyPressed hk s/LogicalKeyboardKey.shiftLeft)
-                     (.isLogicalKeyPressed hk s/LogicalKeyboardKey.shiftRight))]
+                     (.isLogicalKeyPressed hk s/LogicalKeyboardKey.shiftRight))
+          shift-key? (or (= logical-key s/LogicalKeyboardKey.shiftLeft)
+                         (= logical-key s/LogicalKeyboardKey.shiftRight))]
+
+      ;; If any key other than Shift is pressed, don't treat Shift as "alone" for mode toggle
+      (when (not shift-key?)
+        (reset! !shift-alone-pressed false))
 
       (cond
         ;; 1. Shortcut: Ctrl + Space to toggle IME
         (and ctrl? (= logical-key s/LogicalKeyboardKey.space))
         (do (swap! !ime-state update :enabled? not) m/KeyEventResult.handled)
 
-        ;; 2. Shortcut: Shift + - to force trigger grammatical suffixes
+        ;; 2. Shift KeyDown: mark "shift alone" and pass through (toggle happens on KeyUp if no other key was pressed)
+        (and (not ctrl?) shift-key?)
+        (do (reset! !shift-alone-pressed true) m/KeyEventResult.ignored)
+
+        ;; 3. Shortcut: Shift + - to force trigger grammatical suffixes
         (or (and shift? (= logical-key s/LogicalKeyboardKey.minus))
             (= logical-key s/LogicalKeyboardKey.underscore))
         (do 
@@ -137,7 +169,12 @@
         ;; Allow native handling if IME is disabled or client lost focus
         (or (not enabled?) (nil? @!active-client)) m/KeyEventResult.ignored
 
-        ;; 3. ESC: Clear current preview and close overlays
+        ;; Latin mode: pass through printable ASCII (letters, digits, symbols) as-is
+        (and latin-mode? char-str (re-matches #"[\x20-\x7E]" char-str))
+        (do (when-let [f (:replace-text! @!active-client)] (f 0 char-str))
+            m/KeyEventResult.handled)
+
+        ;; 4. ESC: Clear current preview and close overlays
         (= logical-key s/LogicalKeyboardKey.escape)
         (if (or (seq buffer) (seq candidates))
           (do (when-let [f (:replace-text! @!active-client)]
@@ -146,8 +183,8 @@
               m/KeyEventResult.handled)
           m/KeyEventResult.ignored)
 
-        ;; 4. Letter input (A-Z)
-        (and char-str (re-matches #"[a-zA-Z]" char-str))
+        ;; 5. Letter input (A-Z) — Mongol mode only
+        (and (not latin-mode?) char-str (re-matches #"[a-zA-Z]" char-str))
         (let [nb (str buffer (.toLowerCase char-str))]
           (swap! !ime-state assoc :buffer nb :page-index 0)
           (update-editor-preview! nb) 
@@ -155,8 +192,8 @@
           (query-candidates! nb :typing) 
           m/KeyEventResult.handled)
 
-        ;; 5. Backspace
-        (= logical-key s/LogicalKeyboardKey.backspace)
+        ;; 6. Backspace — Mongol mode only (Latin mode: let system handle)
+        (and (not latin-mode?) (= logical-key s/LogicalKeyboardKey.backspace))
         (if (seq buffer)
           (let [nb (subs buffer 0 (dec (count buffer)))]
             (swap! !ime-state assoc :buffer nb :page-index 0)
@@ -169,14 +206,14 @@
               m/KeyEventResult.ignored)
             m/KeyEventResult.ignored))
 
-        ;; 6. Space: Commit the first candidate, then add a space
-        (= logical-key s/LogicalKeyboardKey.space)
+        ;; 7. Space: Commit the first candidate, then add a space — Mongol mode only
+        (and (not latin-mode?) (= logical-key s/LogicalKeyboardKey.space))
         (if (seq buffer)
           (do (commit-text! (or (get-current-page-word @!ime-state) (mapping/translate buffer)) :add-space-after? true)
               m/KeyEventResult.handled)
           m/KeyEventResult.ignored)
 
-        ;; 7. Number keys (1-5): Select candidate, then add a space
+        ;; 8. Number keys (1-5): Select candidate, then add a space
         (and char-str (re-matches #"[1-5]" char-str))
         (if (or (seq buffer) (seq candidates))
           (let [idx (+ (* page-index page-size) (dec (int/parse char-str)))]
@@ -184,7 +221,7 @@
             m/KeyEventResult.handled)
           m/KeyEventResult.ignored)
 
-        ;; 8. Page Down: = / +
+        ;; 9. Page Down: = / +
         (and (or (seq buffer) (seq candidates)) 
              (or (= logical-key s/LogicalKeyboardKey.equal) (= char-str "=") (= char-str "+")))
         (do 
@@ -193,7 +230,7 @@
                                 (update s :page-index inc) s)))
           m/KeyEventResult.handled)
 
-        ;; 9. Page Up: - (Make sure to avoid Shift)
+        ;; 10. Page Up: - (Make sure to avoid Shift)
         (and (or (seq buffer) (seq candidates)) 
              (not shift?) 
              (or (= logical-key s/LogicalKeyboardKey.minus) (= char-str "-")))
@@ -203,8 +240,8 @@
                                 (update s :page-index dec) s)))
           m/KeyEventResult.handled)
 
-        ;; 10. 🔑 Punctuation mapping (, and .)
-        (and char-str (or (= char-str ",") (= char-str ".")))
+        ;; 11. Punctuation mapping (, and .) — Mongol mode only
+        (and (not latin-mode?) char-str (or (= char-str ",") (= char-str ".")))
         (let [mongol-punct (if (= char-str ",") "᠂" "᠃")]
           ;; If currently spelling a word, commit the first candidate first
           (when (seq buffer)
