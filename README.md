@@ -79,8 +79,8 @@ The mapping in `mapping.cljd` should match your FST key encoding.
 
 ## Dependencies (example app)
 
-- **mongol** – Mongol script text field and layout.
-- **mongol_code** – Mongolian suffix/grammar (e.g. case endings).
+- **[mongol](https://github.com/suragch/mongol)** – Mongol script text field and layout.
+- **[mongol_code](https://github.com/suragch/mongol_code)** – Mongolian suffix/grammar (e.g. case endings).
 
 ## License
 
