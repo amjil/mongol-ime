@@ -233,11 +233,14 @@
 
         ;; 7. Space: Commit the first candidate, then add a space — Mongol mode only
         (and (not latin-mode?) (= logical-key s/LogicalKeyboardKey.space))
-        (if (seq buffer)
-          (do (commit-text! (or (get-current-page-word @!ime-state) (mapping/translate buffer)) :add-space-after? true)
-              m/KeyEventResult.handled)
+        (if (or (seq buffer) (seq candidates))
+          (let [word-to-commit (or (get-current-page-word @!ime-state) 
+                                   (when (seq buffer) (mapping/translate buffer)))]
+            (when word-to-commit
+              (commit-text! word-to-commit :add-space-after? true))
+            m/KeyEventResult.handled)
           m/KeyEventResult.ignored)
-
+        
         ;; 8. Number keys (1-5): Select candidate, then add a space
         (and char-str (re-matches #"[1-5]" char-str))
         (if (or (seq buffer) (seq candidates))
