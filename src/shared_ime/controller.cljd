@@ -154,16 +154,18 @@
         (do (reset! !shift-alone-pressed true) m/KeyEventResult.ignored)
 
         ;; 3. Shortcut: Shift + - to force trigger grammatical suffixes
+        ;; Match: Shift+minus (logicalKey.minus), or logicalKey.underscore (US layout Shift+-), or character "_" as fallback
         (or (and shift? (= logical-key s/LogicalKeyboardKey.minus))
-            (= logical-key s/LogicalKeyboardKey.underscore))
-        (do 
+            (= logical-key s/LogicalKeyboardKey.underscore)
+            (and shift? (= char-str "_")))
+        (do
           ;; If there's uncommitted Pinyin preview, force clear it to avoid mess
           (when (> (:preview-len @!ime-state) 0)
             (when-let [f (:replace-text! @!active-client)]
               (f (:preview-len @!ime-state) "")))
           (swap! !ime-state assoc :buffer "" :preview-len 0)
           ;; Manually trigger suffix query mode
-          (query-candidates! "" :manual-suffix) 
+          (query-candidates! "" :manual-suffix)
           m/KeyEventResult.handled)
 
         ;; Allow native handling if IME is disabled or client lost focus
