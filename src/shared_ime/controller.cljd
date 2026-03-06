@@ -194,18 +194,41 @@
           (query-candidates! nb :typing) 
           m/KeyEventResult.handled)
 
+
         ;; 6. Backspace — Mongol mode only (Latin mode: let system handle)
         (and (not latin-mode?) (= logical-key s/LogicalKeyboardKey.backspace))
         (if (seq buffer)
+          ;; A. If typing Pinyin, delete one character from the Pinyin buffer
           (let [nb (subs buffer 0 (dec (count buffer)))]
             (swap! !ime-state assoc :buffer nb :page-index 0)
             (update-editor-preview! nb) 
             (query-candidates! nb :typing) 
             m/KeyEventResult.handled)
-          (if (seq candidates)
-            (do
-              (swap! !ime-state assoc :candidates [] :page-index 0)
-              m/KeyEventResult.ignored)
+          
+          ;; B. If Pinyin buffer is empty, read text before caret and check if it's a complete Mongolian word
+          (if-let [get-ctx (:get-context-text! @!active-client)]
+            (let [ctx-text (get-ctx)
+                  ;; Regex: match consecutive Mongolian letters and control chars immediately before caret
+                  ;; Includes: \u1800-\u18AF (Mongolian letters)
+                  ;;           \u202F (NNBSP suffix separator)
+                  ;;           \u180E (MVS vowel separator)
+                  ;;           \u200C\u200D (zero-width joiner/non-joiner)
+                  match (re-find #"([\u1800-\u18AF\u202F\u180E\u200C\u200D]+)$" ctx-text)]
+              (if match
+                ;; Matched Mongolian word: compute its length and delete it in one go
+                (let [word (first match)
+                      word-len (count word)]
+                  (when-let [replace-fn (:replace-text! @!active-client)]
+                    (replace-fn word-len ""))
+                  ;; Clear any leftover prediction candidate list
+                  (swap! !ime-state assoc :candidates [] :page-index 0)
+                  m/KeyEventResult.handled)
+                  
+                ;; If text before caret is not Mongolian (e.g. space, punctuation, Latin), pass through to native editor (delete 1 char at a time)
+                (do
+                  (swap! !ime-state assoc :candidates [] :page-index 0)
+                  m/KeyEventResult.ignored)))
+            ;; If context cannot be obtained, pass through safely
             m/KeyEventResult.ignored))
 
         ;; 7. Space: Commit the first candidate, then add a space — Mongol mode only
