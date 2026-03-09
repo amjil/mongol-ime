@@ -5,6 +5,9 @@
    [cljd.flutter :as f]
    [shared-ime.controller :as ctrl]))
 
+;; Key for the overlay Stack; used to convert global caret position to Stack-local for Positioned.
+(defonce !overlay-stack-key (atom nil))
+
 (defn- candidate-item [idx word is-suffix]
   (m/Padding
    .padding (m.EdgeInsets/symmetric .horizontal 10.0)
@@ -21,11 +24,23 @@
   (let [{:keys [buffer candidates page-index page-size caret-offset]} state
         display-cands (->> candidates (drop (* page-index page-size)) (take page-size))
         show? (and (or (seq buffer) (seq candidates)) (seq display-cands))
-        is-suffix? (empty? buffer)]
+        is-suffix? (empty? buffer)
+        ;; caret-offset from IME is global; Positioned is in Stack local coords → convert
+        pair (if caret-offset
+               (when-let [k @!overlay-stack-key]
+                 (when-let [ctx (.-currentContext k)]
+                   (try
+                     (let [^m/RenderBox rb (.findRenderObject ctx)
+                           local (.globalToLocal rb caret-offset)]
+                       [(+ (.-dx local) 30.0) (.-dy local)])
+                     (catch Exception _ nil))))
+               nil)
+        left (if pair (first pair) 100.0)
+        top (if pair (second pair) 100.0)]
     (if show?
       (m/Positioned
-       .left (if caret-offset (+ (.-dx caret-offset) 30.0) 100.0)
-       .top (if caret-offset (.-dy caret-offset) 100.0)
+       .left left
+       .top top
        .child
        (m/Material
         .elevation 8.0 .color m.Colors/white .borderRadius (m.BorderRadius/circular 4.0)
@@ -46,6 +61,8 @@
       (m/Positioned .child (m/SizedBox.shrink)))))
 
 (defn ime-global-wrapper [child]
+  (when-not @!overlay-stack-key
+    (reset! !overlay-stack-key (m/GlobalKey.)))
   (f/widget
    :watch [state ctrl/!ime-state]
-   (m/Stack .children [child (candidates-overlay state)])))
+   (m/Stack .key @!overlay-stack-key .children [child (candidates-overlay state)])))
