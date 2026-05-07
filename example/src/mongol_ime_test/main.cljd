@@ -1,26 +1,27 @@
 (ns mongol-ime-test.main
   (:require
    ["package:flutter/material.dart" :as m]
+   ["package:flutter/foundation.dart" :refer [kIsWeb]]
    ["package:mongol/mongol.dart" :as mongol]
    [cljd.flutter :as f]
    [shared-ime.controller :as ctrl]
-   [shared-ime.fst-reader :as fst]
    [shared-ime.overlay-view :as overlay]
-   [shared-ime.next :as next]))
+   [ime-core.remote-api :as remote]
+   [ime-core.fst-engine :as fst]
+   [ime-core.next-word :as next-word]))
 
 (defonce editor-key (m/GlobalKey.))
 
 (defn mongol-ime-field []
   (f/widget
    :managed [controller (m/TextEditingController.)
-             ;; Use as-> to bind temp symbol n for self-reference in listener
              focus-node (as-> (m/FocusNode
                                .onKeyEvent (fn [node event] (ctrl/handle-key-event event))) n
                           (doto n
                             (.addListener
                              (fn []
                                (if (.-hasFocus n)
-                                 ;; Focus gained: register IME client
+                                 ;; Focus gained: register IME client callbacks
                                  (ctrl/register-client!
                                   {:replace-text!
                                    (fn [delete-len insert-str]
@@ -49,10 +50,11 @@
                                            sel (.-selection val)
                                            start-idx (max 0 (.-start sel))]
                                        (subs text 0 start-idx)))})
+                                 
                                  ;; Focus lost: unregister IME
                                  (ctrl/unregister-client!))))))]
-
-   ;; Watch text changes to refresh caret and candidate overlay
+   
+   ;; Watch text changes to refresh caret position and candidate overlay
    :bg-watcher ([^m/TextEditingValue val controller]
                 (when-let [update-fn (:update-caret! @ctrl/!active-client)]
                   (update-fn)))
@@ -76,10 +78,21 @@
                                      .fillColor (m.Colors/grey 50)
                                      .border m.InputBorder/none))))))
 
-(defn main []
+(defn ^:async main []
   (m.WidgetsFlutterBinding/ensureInitialized)
-  (fst/ensure-loaded)
-  (next/ensure-loaded)
+  
+  ;; 1. Configure Remote API for Web usage.
+  ;; Update the base-url and paths if your backend server configuration changes.
+  (remote/set-config! {:base-url "localhost:3003"
+                       :candidate-api-path "/api/next_word/candidates"
+                       :next-word-api-path "/api/next_word/list"})
+  
+  ;; 2. Initialize local FST and Next-Word engines ONLY if running on Desktop Native.
+  ;; Web environments rely strictly on the remote HTTP APIs configured above.
+  (when-not kIsWeb
+    (await (fst/ensure-loaded))
+    (await (next-word/ensure-loaded)))
+  
   (f/run
    (m/MaterialApp
     .theme (m/ThemeData .useMaterial3 true 
