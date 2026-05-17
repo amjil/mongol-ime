@@ -90,6 +90,10 @@
       (when-let [f (:replace-text! client)]
         (f preview-len mongol-preview))
       (swap! !ime-state assoc :preview-len (count mongol-preview)))))
+      
+(defn update-caret-offset!
+  [offset]
+  (swap! !ime-state assoc :caret-offset offset))
 
 (defn commit-text! 
   "Commit text: Insert the selected Mongolian word."

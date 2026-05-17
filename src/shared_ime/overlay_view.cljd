@@ -5,9 +5,6 @@
    [cljd.flutter :as f]
    [shared-ime.controller :as ctrl]))
 
-;; Key for the overlay Stack; used to convert global caret position to Stack-local for Positioned.
-(defonce !overlay-stack-key (atom nil))
-
 (defn- candidate-item [idx word is-suffix]
   (m/Padding
    .padding (m.EdgeInsets/symmetric .horizontal 10.0)
@@ -24,45 +21,79 @@
   (let [{:keys [buffer candidates page-index page-size caret-offset]} state
         display-cands (->> candidates (drop (* page-index page-size)) (take page-size))
         show? (and (or (seq buffer) (seq candidates)) (seq display-cands))
-        is-suffix? (empty? buffer)
-        ;; caret-offset from IME is global; Positioned is in Stack local coords → convert
-        pair (if caret-offset
-               (when-let [k @!overlay-stack-key]
-                 (when-let [ctx (.-currentContext k)]
-                   (try
-                     (let [^m/RenderBox rb (.findRenderObject ctx)
-                           local (.globalToLocal rb caret-offset)]
-                       [(+ (.-dx local) 30.0) (.-dy local)])
-                     (catch Exception _ nil))))
-               nil)
-        left (if pair (first pair) 100.0)
-        top (if pair (second pair) 100.0)]
+        is-suffix? (empty? buffer)]
     (if show?
-      (m/Positioned
-       .left left
-       .top top
-       .child
-       (m/Material
-        .elevation 8.0 .color m.Colors/white .borderRadius (m.BorderRadius/circular 4.0)
+      (f/widget
+       :context ctx
+       :let [size (m/MediaQuery.sizeOf ctx)
+             screen-w (.-width size)
+             screen-h (.-height size)
+             
+             ;; 1. Estimate overlay dimensions
+             ;; Box width is roughly 160px for vertical Mongol text
+             box-w 160.0
+             ;; Box height is dynamic based on items (approx 45px per item + 40px padding/footer)
+             box-h (+ 40.0 (* (count display-cands) 45.0))
+             
+             ;; Extract raw caret coordinates
+             caret-x (if caret-offset (.-dx caret-offset) 100.0)
+             caret-y (if caret-offset (.-dy caret-offset) 100.0)
+             
+             ;; 2. 🌟 Smart X-Axis (Horizontal) Flipping
+             ;; Try placing on the right. If it exceeds screen width, flip it to the left of the caret!
+             right-pos (+ caret-x 30.0)
+             safe-x (if (> (+ right-pos box-w) screen-w)
+                      (max 10.0 (- caret-x box-w 10.0)) ;; Flip left, ensuring it doesn't go off-screen left
+                      right-pos)
+                      
+             ;; 3. 🌟 Smart Y-Axis (Vertical) Clamping
+             ;; Ensure the box never goes below the bottom edge or above the top edge
+             safe-y (max 10.0 (min caret-y (- screen-h box-h 20.0)))]
+       
+       (m/Positioned
+        ;; Use the calculated safe physical coordinates
+        .left safe-x
+        .top safe-y
         .child
-        (m/Container
-         .padding (m.EdgeInsets/all 10.0)
-         .decoration (m/BoxDecoration .border (m/Border.all .color (if is-suffix? m.Colors/orange m.Colors/blue))
-                                      .borderRadius (m.BorderRadius/circular 4.0))
+        (m/Material
+         .elevation 8.0 .color m.Colors/white .borderRadius (m.BorderRadius/circular 4.0)
          .child
-         (m/Column
-          .mainAxisSize m.MainAxisSize/min
-          .children
-          [(m/Row
-            .mainAxisSize m.MainAxisSize/min
-            .crossAxisAlignment m.CrossAxisAlignment/start
-            .children (map-indexed #(candidate-item %1 %2 is-suffix?) display-cands))
-           (m/Text (str (inc page-index) "/" (ctrl/total-pages state)) .style (m/TextStyle .fontSize 10.0))]))))
+         (m/Container
+          .padding (m.EdgeInsets/all 10.0)
+          .decoration (m/BoxDecoration .border (m/Border.all .color (if is-suffix? m.Colors/orange m.Colors/blue))
+                                       .borderRadius (m.BorderRadius/circular 4.0))
+          .child
+          (m/Column
+           .mainAxisSize m.MainAxisSize/min
+           .children
+           [(m/Row
+             .mainAxisSize m.MainAxisSize/min
+             .crossAxisAlignment m.CrossAxisAlignment/start
+             .children (map-indexed #(candidate-item %1 %2 is-suffix?) display-cands))
+            (m/Text (str (inc page-index) "/" (ctrl/total-pages state)) .style (m/TextStyle .fontSize 10.0))])))))
+      
       (m/Positioned .child (m/SizedBox.shrink)))))
 
-(defn ime-global-wrapper [child]
-  (when-not @!overlay-stack-key
-    (reset! !overlay-stack-key (m/GlobalKey.)))
-  (f/widget
-   :watch [state ctrl/!ime-state]
-   (m/Stack .key @!overlay-stack-key .children [child (candidates-overlay state)])))
+(defn ime-global-wrapper 
+  "Wraps a child widget with the global IME candidates overlay.
+   Provides an optional wrapper-id to avoid GlobalKey conflicts when used multiple times in the widget tree."
+  ;; Support single arity for backward compatibility
+  ([child]
+   (ime-global-wrapper child "default-ime-wrapper"))
+  ;; Support two arities: pass a unique ID to prevent crashes
+  ([child wrapper-id]
+   (f/widget
+    ;; Assign a fixed identity to break GlobalKey conflicts
+    :key (m/ValueKey. wrapper-id)
+    :context ctx
+    :watch [state ctrl/!ime-state]
+    :let [;; Detect if the current wrapper is at the top of the route stack (active state)
+          route (m/ModalRoute.of ctx)
+          is-active? (if route (.-isCurrent route) true)]
+    (m/Stack 
+     .children 
+     [child 
+      ;; Only render the candidate overlay if this wrapper is currently active/visible at the front
+      (if is-active?
+        (candidates-overlay state)
+        (m/SizedBox.shrink))]))))
