@@ -1,4 +1,6 @@
 (ns shared-ime.controller
+  "Global Input Method Engine (IME) controller for Mongolian phonetic input.
+   Handles key events, dictionary lookups, candidates pagination, and direct control character injections."
   (:require
    ["package:flutter/material.dart" :as m]
    ["package:flutter/services.dart" :as s]
@@ -48,7 +50,6 @@
 (defn- query-candidates! 
   "Determine what to query based on trigger-mode."
   [buffer trigger-mode]
-  ;; Pass the web-aware remote flag to the core engine
   (let [query-opts {:use-remote? (use-remote?)}]
     (case trigger-mode
       :typing
@@ -114,7 +115,6 @@
 ;; ==========================================
 ;; Keyboard Event Dispatcher
 ;; ==========================================
-;; (这部分保持完全不变，之前的物理按键拦截逻辑完美兼容 Flutter Web)
 (defn handle-key-event [^s/KeyEvent event]
   (cond
     (dart/is? event s/KeyUpEvent)
@@ -141,7 +141,18 @@
           shift? (or (.isLogicalKeyPressed hk s/LogicalKeyboardKey.shiftLeft)
                      (.isLogicalKeyPressed hk s/LogicalKeyboardKey.shiftRight))
           shift-key? (or (= logical-key s/LogicalKeyboardKey.shiftLeft)
-                         (= logical-key s/LogicalKeyboardKey.shiftRight))]
+                         (= logical-key s/LogicalKeyboardKey.shiftRight))
+          
+          ;; 🌟 CENTRALIZED DIRECT CHARACTER MAPPING
+          direct-char (if latin-mode? nil
+                        (cond
+                          (and shift? (= logical-key s/LogicalKeyboardKey.space)) "\u202F"
+                          (= logical-key s/LogicalKeyboardKey.bracketLeft) "\u180B"
+                          (= logical-key s/LogicalKeyboardKey.bracketRight) "\u180C"
+                          (= logical-key s/LogicalKeyboardKey.backslash) "\u180D"
+                          (or (= char-str ",") (= logical-key s/LogicalKeyboardKey.comma)) "\u1808"
+                          (or (= char-str ".") (= logical-key s/LogicalKeyboardKey.period)) "\u1809"
+                          :else nil))]
 
       (when (not shift-key?)
         (reset! !shift-alone-pressed false))
@@ -153,6 +164,7 @@
         (and (not ctrl?) shift-key?)
         (do (reset! !shift-alone-pressed true) m/KeyEventResult.ignored)
 
+        ;; Trigger Manual Suffix Menu (Shift + -)
         (or (and shift? (= logical-key s/LogicalKeyboardKey.minus))
             (= logical-key s/LogicalKeyboardKey.underscore)
             (and shift? (= char-str "_")))
@@ -178,8 +190,21 @@
               m/KeyEventResult.handled)
           m/KeyEventResult.ignored)
 
-        (and (not latin-mode?) char-str (re-matches #"[a-zA-Z]" char-str))
-        (let [nb (str buffer (.toLowerCase char-str))]
+        ;; 🌟 INJECT DIRECT CHARACTERS (Punctuation, FVS, NNBSP)
+        (some? direct-char)
+        (do
+          (when (seq buffer)
+            (commit-text! (or (get-current-page-word @!ime-state) (mapping/translate buffer))))
+          (when-let [f (:replace-text! @!active-client)]
+            (f (:preview-len @!ime-state) direct-char))
+          (swap! !ime-state assoc :buffer "" :preview-len 0 :candidates [] :page-index 0)
+          m/KeyEventResult.handled)
+
+        ;; 🌟 TYPING REGEX: Now allows "-", "=", and "+" (Shift + =) to enter the buffer for MVS typing!
+        (and (not latin-mode?) char-str (re-matches #"[a-zA-Z\-\=\+]" char-str))
+        (let [;; Convert "+" (Shift + =) to "=" so it maps to MVS (\u180E) seamlessly
+              mapped-char (if (= char-str "+") "=" char-str)
+              nb (str buffer (.toLowerCase mapped-char))]
           (swap! !ime-state assoc :buffer nb :page-index 0)
           (update-editor-preview! nb) 
           (query-candidates! nb :typing) 
@@ -224,30 +249,24 @@
             m/KeyEventResult.handled)
           m/KeyEventResult.ignored)
 
+        ;; 🌟 PAGINATION: Page Down (ArrowDown or PageDown key)
         (and (or (seq buffer) (seq candidates)) 
-             (or (= logical-key s/LogicalKeyboardKey.equal) (= char-str "=") (= char-str "+")))
+             (or (= logical-key s/LogicalKeyboardKey.pageDown)
+                 (= logical-key s/LogicalKeyboardKey.arrowDown)))
         (do 
           (swap! !ime-state (fn [s] 
                               (if (< (:page-index s) (dec (total-pages s))) 
                                 (update s :page-index inc) s)))
           m/KeyEventResult.handled)
 
+        ;; 🌟 PAGINATION: Page Up (ArrowUp or PageUp key)
         (and (or (seq buffer) (seq candidates)) 
-             (not shift?) 
-             (or (= logical-key s/LogicalKeyboardKey.minus) (= char-str "-")))
+             (or (= logical-key s/LogicalKeyboardKey.pageUp)
+                 (= logical-key s/LogicalKeyboardKey.arrowUp)))
         (do 
           (swap! !ime-state (fn [s] 
                               (if (> (:page-index s) 0) 
                                 (update s :page-index dec) s)))
-          m/KeyEventResult.handled)
-
-        (and (not latin-mode?) char-str (or (= char-str ",") (= char-str ".")))
-        (let [mongol-punct (if (= char-str ",") "᠂" "᠃")]
-          (when (seq buffer)
-            (commit-text! (or (get-current-page-word @!ime-state) (mapping/translate buffer))))
-          (when-let [f (:replace-text! @!active-client)]
-            (f (:preview-len @!ime-state) mongol-punct))
-          (swap! !ime-state assoc :buffer "" :preview-len 0 :candidates [] :page-index 0)
           m/KeyEventResult.handled)
 
         :else m/KeyEventResult.ignored))))

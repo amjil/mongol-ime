@@ -1,9 +1,9 @@
 (ns shared-ime.mapping
   (:require ["dart:core" :as dc]))
 
-;; ==========================================
+;; =============================================================
 ;; Latin to Mongolian Unicode Mapping
-;; ==========================================
+;; =============================================================
 ;; Base mapping: maps Latin characters to their corresponding 
 ;; Mongolian Unicode representations. 
 ;; Vowels are explicitly mapped to match standard Mongolian keyboard layouts:
@@ -22,8 +22,29 @@
    "x" "\u1831" "t" "\u1832" "d" "\u1833" "q" "\u1834" "j" "\u1835"
    "y" "\u1836" "r" "\u1837" "w" "\u1838"
    
-   ;; Uppercase mappings (add more if your input logic requires distinct uppercase handling)
-   "A" "\u1820" "G" "\u182d" "H" "\u182c"})
+   ;; Uppercase mappings (fallback for un-intercepted shift strokes)
+   "A" "\u1820" "G" "\u182d" "H" "\u182c"
+
+   ;; ==========================================================
+   ;; Desktop Core Control Character Mappings (Option 1)
+   ;; ==========================================================
+   
+   ;; MVS (Mongolian Vowel Separator) mapped to minus and equals signs
+   "-" "\u180E"
+   "=" "\u180E" 
+   
+   ;; FVS (Free Variation Selectors) mapped to bracket and backslash keys
+   "[" "\u180B"  ;; FVS1
+   "]" "\u180C"  ;; FVS2
+   "\\" "\u180D" ;; FVS3
+
+   ;; ==========================================================
+   ;; Desktop Punctuation Mappings
+   ;; ==========================================================
+   
+   "," "\u1808"  ;; Mongolian Comma
+   "." "\u1809"  ;; Mongolian Full Stop
+   })
 
 (defn translate
   "Translates a Latin input string into a Mongolian lookup string.
