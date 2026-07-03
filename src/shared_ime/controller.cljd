@@ -152,8 +152,8 @@
                             (= logical-key s/LogicalKeyboardKey.backslash) "\u180D"
                             (or (= char-str ",") (= logical-key s/LogicalKeyboardKey.comma)) "\u1808"
                             (or (= char-str ".") (= logical-key s/LogicalKeyboardKey.period)) "\u1809"
-                            (or (= char-str "?") (= logical-key s/LogicalKeyboardKey.slash)) "\uFF1F"
-                            (or (= char-str "!") (= logical-key s/LogicalKeyboardKey.digit1)) "\uFF01"
+                            (= char-str "?")  "\uFF1F"
+                            (= char-str "!") "\uFF01"
                             :else nil))]
 
       (when (not shift-key?)
