@@ -204,7 +204,7 @@
         (and (not latin-mode?) char-str (re-matches #"[a-zA-Z\-\=\+]" char-str))
         (let [;; Convert "+" (Shift + =) to "=" so it maps to MVS (\u180E) seamlessly
               mapped-char (if (= char-str "+") "=" char-str)
-              nb (str buffer (.toLowerCase mapped-char))]
+              nb (str buffer mapped-char)]
           (swap! !ime-state assoc :buffer nb :page-index 0)
           (update-editor-preview! nb) 
           (query-candidates! nb :typing) 

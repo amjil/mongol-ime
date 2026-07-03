@@ -24,6 +24,7 @@
    
    ;; Uppercase mappings (fallback for un-intercepted shift strokes)
    "A" "\u1820" "G" "\u182d" "H" "\u182c"
+   "N" "\u1829"
 
    ;; ==========================================================
    ;; Desktop Core Control Character Mappings (Option 1)

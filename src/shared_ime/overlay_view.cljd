@@ -15,7 +15,7 @@
     .children
     [(m/Text (str (inc idx) ".") .style (m/TextStyle .fontSize 12.0 .color m.Colors/grey))
      ;; Use MongolText directly (no m/Row or "-" separator)
-     (mongol/MongolText word .style (m/TextStyle .fontSize 26.0 .color m.Colors/black))])))
+     (mongol/MongolText word .style (m/TextStyle .fontSize 26.0 .fontFamily "OyunQaganTig" .color m.Colors/black))])))
      
 (defn candidates-overlay [state]
   (let [{:keys [buffer candidates page-index page-size caret-offset]} state
