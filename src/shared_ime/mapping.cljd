@@ -45,6 +45,8 @@
    
    "," "\u1808"  ;; Mongolian Comma
    "." "\u1809"  ;; Mongolian Full Stop
+   "?" "\uFF1F"  ;; Mongolian Questionnaire
+   "!" "\uFF01"  ;; Mongolian Exclamation
    })
 
 (defn translate
