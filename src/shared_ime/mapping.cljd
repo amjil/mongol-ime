@@ -20,11 +20,14 @@
    "n" "\u1828" "b" "\u182a" "p" "\u182b"
    "h" "\u182c" "g" "\u182d" "m" "\u182e" "l" "\u182f" "s" "\u1830"
    "x" "\u1831" "t" "\u1832" "d" "\u1833" "q" "\u1834" "j" "\u1835"
-   "y" "\u1836" "r" "\u1837" "w" "\u1838"
+   "k" "\u183a" "y" "\u1836" "r" "\u1837" "w" "\u1838"
+   "z" "\u183d" 
    
    ;; Uppercase mappings (fallback for un-intercepted shift strokes)
    "A" "\u1820" "G" "\u182d" "H" "\u182c"
    "N" "\u1829"
+   "Q" "\u1842"
+   "C" "\u183c"
 
    ;; ==========================================================
    ;; Desktop Core Control Character Mappings (Option 1)

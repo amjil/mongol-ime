@@ -104,7 +104,8 @@
           base-text (if (empty? buffer)
                       (if (str/starts-with? text " ")
                         text             
-                        (str "\u202F" text)) 
+                        ;(str "\u202F" text)
+                        text)
                       text)              
           final-text (if add-space-after? (str base-text " ") base-text)]
       (when-let [f (:replace-text! client)]
