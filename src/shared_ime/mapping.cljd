@@ -9,34 +9,39 @@
 ;; Vowels are explicitly mapped to match standard Mongolian keyboard layouts:
 ;; c -> ᠣ (\u1823), v -> ᠤ (\u1824), o -> ᠥ (\u1825), u -> ᠦ (\u1826)
 (def latin->mongol-map
-  {"a" "\u1820" 
-   "e" "\u1821" 
-   "i" "\u1822" 
+  {"a" "\u1820"
+   "e" "\u1821"
+   "i" "\u1822"
    "c" "\u1823" ;; ᠣ
    "v" "\u1824" ;; ᠤ
    "o" "\u1825" ;; ᠥ
    "u" "\u1826" ;; ᠦ
-   
+
    "n" "\u1828" "b" "\u182a" "p" "\u182b"
    "h" "\u182c" "g" "\u182d" "m" "\u182e" "l" "\u182f" "s" "\u1830"
    "x" "\u1831" "t" "\u1832" "d" "\u1833" "q" "\u1834" "j" "\u1835"
    "k" "\u183a" "y" "\u1836" "r" "\u1837" "w" "\u1838"
-   "z" "\u183d" 
-   
+   "z" "\u183d"
+
    ;; Uppercase mappings (fallback for un-intercepted shift strokes)
-   "A" "\u1820" "G" "\u182d" "H" "\u182c"
+   "A" "\u1820" 
+   "G" "\u182d"
    "N" "\u1829"
+   "H" "\u183e"
    "Q" "\u1842"
    "C" "\u183c"
+   "R" "\u183f"
+   "Z" "\u1841"
+   "L" "\u1840"
 
    ;; ==========================================================
    ;; Desktop Core Control Character Mappings (Option 1)
    ;; ==========================================================
-   
+
    ;; MVS (Mongolian Vowel Separator) mapped to minus and equals signs
    "-" "\u180E"
-   "=" "\u180E" 
-   
+   "=" "\u180E"
+
    ;; FVS (Free Variation Selectors) mapped to bracket and backslash keys
    "[" "\u180B"  ;; FVS1
    "]" "\u180C"  ;; FVS2
@@ -45,7 +50,7 @@
    ;; ==========================================================
    ;; Desktop Punctuation Mappings
    ;; ==========================================================
-   
+
    "," "\u1808"  ;; Mongolian Comma
    "." "\u1809"  ;; Mongolian Full Stop
    "?" "\uFF1F"  ;; Mongolian Questionnaire
