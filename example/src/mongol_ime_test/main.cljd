@@ -49,7 +49,19 @@
                                            text (.-text val)
                                            sel (.-selection val)
                                            start-idx (max 0 (.-start sel))]
-                                       (subs text 0 start-idx)))})
+                                       (subs text 0 start-idx)))
+
+                                   :select-all!
+                                   (fn []
+                                     (let [val (.-value controller)
+                                           text (.-text val)
+                                           len (count text)]
+                                       (set! (.-value controller)
+                                             (m/TextEditingValue.
+                                              .text text
+                                              .selection (m/TextSelection.
+                                                          .baseOffset 0
+                                                          .extentOffset len)))))})
                                  
                                  ;; Focus lost: unregister IME
                                  (ctrl/unregister-client!))))))]

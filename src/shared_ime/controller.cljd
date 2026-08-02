@@ -137,11 +137,8 @@
           logical-key (.-logicalKey event)
           char-str (.-character event)
           hk s/HardwareKeyboard.instance
-          ctrl? (or (.isLogicalKeyPressed hk s/LogicalKeyboardKey.controlLeft)
-                    (.isLogicalKeyPressed hk s/LogicalKeyboardKey.metaLeft))
-          shift? (or (.-isShiftPressed hk)
-                     (.isLogicalKeyPressed hk s/LogicalKeyboardKey.shiftLeft)
-                     (.isLogicalKeyPressed hk s/LogicalKeyboardKey.shiftRight))
+          ctrl? (or (.-isControlPressed hk) (.-isMetaPressed hk))
+          shift? (.-isShiftPressed hk)
           shift-key? (or (= logical-key s/LogicalKeyboardKey.shiftLeft)
                          (= logical-key s/LogicalKeyboardKey.shiftRight))
           
@@ -195,6 +192,17 @@
           m/KeyEventResult.handled)
 
         (or (not enabled?) (nil? @!active-client)) m/KeyEventResult.ignored
+
+        ;; Ctrl/Cmd+A: select all text in the active editor
+        (and ctrl? (= logical-key s/LogicalKeyboardKey.keyA))
+        (do
+          (swap! !ime-state assoc :buffer "" :preview-len 0 :candidates [] :page-index 0)
+          (when-let [f (:select-all! @!active-client)] (f))
+          m/KeyEventResult.handled)
+
+        ;; Let other Ctrl/Cmd shortcuts (copy/paste/cut/undo…) pass through
+        ctrl?
+        m/KeyEventResult.ignored
 
         (and latin-mode? char-str (re-matches #"[\x20-\x7E]" char-str))
         (do (when-let [f (:replace-text! @!active-client)] (f 0 char-str))
