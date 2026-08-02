@@ -139,7 +139,8 @@
           hk s/HardwareKeyboard.instance
           ctrl? (or (.isLogicalKeyPressed hk s/LogicalKeyboardKey.controlLeft)
                     (.isLogicalKeyPressed hk s/LogicalKeyboardKey.metaLeft))
-          shift? (or (.isLogicalKeyPressed hk s/LogicalKeyboardKey.shiftLeft)
+          shift? (or (.-isShiftPressed hk)
+                     (.isLogicalKeyPressed hk s/LogicalKeyboardKey.shiftLeft)
                      (.isLogicalKeyPressed hk s/LogicalKeyboardKey.shiftRight))
           shift-key? (or (= logical-key s/LogicalKeyboardKey.shiftLeft)
                          (= logical-key s/LogicalKeyboardKey.shiftRight))
@@ -167,16 +168,30 @@
         (and (not ctrl?) shift-key?)
         (do (reset! !shift-alone-pressed true) m/KeyEventResult.ignored)
 
-        ;; Trigger Manual Suffix Menu (Shift + -)
-        (or (and shift? (= logical-key s/LogicalKeyboardKey.minus))
+        ;; Trigger Manual Suffix Menu (Shift + - / _ / —)
+        ;; CN layouts often emit em-dash (—) for Shift+-; delete trailing space then show suffixes.
+        (or (= char-str "_")
+            (= char-str "\u2014") ;; —
+            (= char-str "\u2013") ;; –
+            (= char-str "\uFF0D") ;; －
             (= logical-key s/LogicalKeyboardKey.underscore)
-            (and shift? (= char-str "_")))
+            (and shift? (or (= logical-key s/LogicalKeyboardKey.minus)
+                            (= char-str "-"))))
         (do
-          (when (> (:preview-len @!ime-state) 0)
-            (when-let [f (:replace-text! @!active-client)]
-              (f (:preview-len @!ime-state) "")))
-          (swap! !ime-state assoc :buffer "" :preview-len 0)
-          (query-candidates! "" :manual-suffix)
+          (when-let [client @!active-client]
+            (when (> (:preview-len @!ime-state) 0)
+              (when-let [f (:replace-text! client)]
+                (f (:preview-len @!ime-state) "")))
+            (swap! !ime-state assoc :buffer "" :preview-len 0)
+            (when-let [get-ctx (:get-context-text! client)]
+              (let [ctx-text (get-ctx)]
+                (when (and (pos? (count ctx-text))
+                           (let [last-ch (subs ctx-text (dec (count ctx-text)))]
+                             (or (= last-ch " ")
+                                 (= last-ch "\u202F"))))
+                  (when-let [f (:replace-text! client)]
+                    (f 1 "")))))
+            (query-candidates! "" :manual-suffix))
           m/KeyEventResult.handled)
 
         (or (not enabled?) (nil? @!active-client)) m/KeyEventResult.ignored
