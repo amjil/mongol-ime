@@ -68,8 +68,7 @@
               (swap! !ime-state assoc :candidates [] :page-index 0)
               (-> (next-word/get-predictions-async last-word query-opts)
                   (.then (fn [next-words]
-                           (let [formatted-next (map #(str " " %) next-words)]
-                             (swap! !ime-state assoc :candidates (vec formatted-next) :page-index 0)))))))
+                           (swap! !ime-state assoc :candidates (vec next-words) :page-index 0))))))
           (swap! !ime-state assoc :candidates [] :page-index 0))
         (swap! !ime-state assoc :candidates [] :page-index 0))
 
@@ -97,21 +96,34 @@
   (swap! !ime-state assoc :caret-offset offset))
 
 (defn commit-text! 
-  "Commit text: Insert the selected Mongolian word."
+  "Commit text: Insert the selected Mongolian word, then show next-word candidates."
   [text & {:keys [add-space-after?] :or {add-space-after? false}}]
   (when-let [client @!active-client]
-    (let [{:keys [buffer preview-len]} @!ime-state
-          base-text (if (empty? buffer)
-                      (if (str/starts-with? text " ")
-                        text             
-                        ;(str "\u202F" text)
-                        text)
-                      text)              
-          final-text (if add-space-after? (str base-text " ") base-text)]
+    (let [{:keys [preview-len]} @!ime-state
+          ;; Only strip leading ASCII spaces (prev commit already added one).
+          ;; Keep NNBSP (\u202F) prefixes used by suffix candidates.
+          base-text (str/replace text #"^ +" "")
+          ;; MVS-prefixed candidates attach to the previous word: drop the trailing space
+          mvs-prefix? (str/starts-with? base-text "\u180E")
+          ctx-text (when-let [g (:get-context-text! client)] (g))
+          drop-prev-space? (and mvs-prefix?
+                                (zero? preview-len)
+                                (pos? (count ctx-text))
+                                (= (subs ctx-text (dec (count ctx-text))) " "))
+          delete-len (+ preview-len (if drop-prev-space? 1 0))
+          final-text (if add-space-after? (str base-text " ") base-text)
+          word-for-predict (str/trim text)
+          query-opts {:use-remote? (use-remote?)}]
       (when-let [f (:replace-text! client)]
-        (f preview-len final-text))
+        (f delete-len final-text))
       (swap! !ime-state assoc :buffer "" :preview-len 0 :candidates [] :page-index 0)
-      (query-candidates! "" :commit))))
+      (when (seq word-for-predict)
+        (-> (next-word/get-predictions-async word-for-predict query-opts)
+            (.then (fn [next-words]
+                     (when (seq next-words)
+                       (swap! !ime-state assoc
+                              :candidates (vec next-words)
+                              :page-index 0)))))))))
 
 ;; ==========================================
 ;; Keyboard Event Dispatcher
