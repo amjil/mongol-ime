@@ -149,8 +149,8 @@
                             (= logical-key s/LogicalKeyboardKey.bracketLeft) "\u180B"
                             (= logical-key s/LogicalKeyboardKey.bracketRight) "\u180C"
                             (= logical-key s/LogicalKeyboardKey.backslash) "\u180D"
-                            (or (= char-str ",") (= logical-key s/LogicalKeyboardKey.comma)) "\u1808"
-                            (or (= char-str ".") (= logical-key s/LogicalKeyboardKey.period)) "\u1809"
+                            (or (= char-str ",") (= logical-key s/LogicalKeyboardKey.comma)) "\u1802"
+                            (or (= char-str ".") (= logical-key s/LogicalKeyboardKey.period)) "\u1803"
                             (= char-str "?")  "\uFF1F"
                             (= char-str "!") "\uFF01"
                             :else nil))]
