@@ -5,95 +5,216 @@
    [cljd.flutter :as f]
    [shared-ime.controller :as ctrl]))
 
-(defn- candidate-item [idx word is-suffix]
+(def default-overlay-style
+  {:candidate-font-size 26.0
+   :index-font-size 11.0
+   :page-font-size 11.0
+   :font-family "OyunQaganTig"})
+
+(defonce !overlay-style (atom default-overlay-style))
+
+(defn set-overlay-style!
+  "Merge overlay typography settings.
+
+  Supported keys:
+  - :candidate-font-size — Mongol candidate text (default 26.0)
+  - :index-font-size     — index badge (default 11.0)
+  - :page-font-size      — page indicator (default 11.0)
+  - :font-family         — candidate font family (default OyunQaganTig)"
+  [style]
+  (swap! !overlay-style merge style)
+  nil)
+
+(defn- badge-size [style]
+  (max 18.0 (+ 10.0 (:index-font-size style))))
+
+(defn- divider-height [style]
+  (* (:candidate-font-size style) 2.75))
+
+(defn- candidate-item [idx word colors style]
+  (let [badge (badge-size style)]
+    (m/Padding
+     .padding (m.EdgeInsets/symmetric .horizontal 8.0 .vertical 6.0)
+     .child
+     (m/Column
+      .mainAxisSize m.MainAxisSize/min
+      .mainAxisAlignment m.MainAxisAlignment/start
+      .children
+      [(m/Container
+        .width badge
+        .height badge
+        .alignment m.Alignment/center
+        .decoration (m/BoxDecoration
+                     .color (.withOpacity (:accent-container colors) 0.85)
+                     .borderRadius (m.BorderRadius/circular (/ badge 2.0)))
+        .child (m/Text (str (inc idx))
+                .style (m/TextStyle
+                        .fontSize (:index-font-size style)
+                        .fontWeight m.FontWeight/w600
+                        .color (:accent-on-container colors))))
+       (m/SizedBox .height 6.0)
+       (mongol/MongolText word
+                          .style (m/TextStyle
+                                  .fontSize (:candidate-font-size style)
+                                  .fontFamily (:font-family style)
+                                  .color (:on-surface colors)
+                                  .height 1.15))]))))
+
+(defn- candidate-divider [colors style]
   (m/Padding
-   .padding (m.EdgeInsets/symmetric .horizontal 10.0)
-   .child
-   (m/Column
-    .mainAxisSize m.MainAxisSize/min
-    .mainAxisAlignment m.MainAxisAlignment/start
-    .children
-    [(m/Text (str (inc idx) ".") .style (m/TextStyle .fontSize 12.0 .color m.Colors/grey))
-     ;; Use MongolText directly (no m/Row or "-" separator)
-     (mongol/MongolText word .style (m/TextStyle .fontSize 26.0 .fontFamily "OyunQaganTig" .color m.Colors/black))])))
-     
-(defn candidates-overlay [state]
+   .padding (m.EdgeInsets/symmetric .vertical 14.0)
+   .child (m/Container
+           .width 1.0
+           .height (divider-height style)
+           .color (.withOpacity (:outline colors) 0.85))))
+
+(defn- candidate-row [display-cands colors style]
+  (let [last-idx (dec (count display-cands))]
+    (m/Row
+     .mainAxisSize m.MainAxisSize/min
+     .crossAxisAlignment m.CrossAxisAlignment/start
+     .children
+     (mapcat (fn [idx word]
+               (let [item [(candidate-item idx word colors style)]]
+                 (if (< idx last-idx)
+                   (conj item (candidate-divider colors style))
+                   item)))
+             (range (count display-cands))
+             display-cands))))
+
+(defn- page-indicator [state colors style]
+  (let [icon-size (max 10.0 (- (:page-font-size style) 1.0))]
+    (m/Container
+     .margin (m.EdgeInsets/only .left 8.0 .right 8.0 .bottom 8.0)
+     .padding (m.EdgeInsets/symmetric .horizontal 10.0 .vertical 5.0)
+     .decoration (m/BoxDecoration
+                  .color (.withOpacity (:accent-container colors) 0.55)
+                  .borderRadius (m.BorderRadius/circular 6.0))
+     .child (m/Row
+             .mainAxisSize m.MainAxisSize/min
+             .mainAxisAlignment m.MainAxisAlignment/center
+             .children
+             [(m/Icon m.Icons/swipe_left
+                      .size icon-size
+                      .color (.withOpacity (:accent-on-container colors) 0.55))
+              (m/SizedBox .width 6.0)
+              (m/Text (str (inc (:page-index state)) "/" (ctrl/total-pages state))
+                      .style (m/TextStyle
+                              .fontSize (:page-font-size style)
+                              .fontWeight m.FontWeight/w500
+                              .color (:accent-on-container colors)
+                              .letterSpacing 0.5))
+              (m/SizedBox .width 6.0)
+              (m/Icon m.Icons/swipe_right
+                      .size icon-size
+                      .color (.withOpacity (:accent-on-container colors) 0.55))]))))
+
+(defn candidates-overlay [state style]
   (let [{:keys [buffer candidates page-index page-size caret-offset]} state
         display-cands (->> candidates (drop (* page-index page-size)) (take page-size))
         show? (and (or (seq buffer) (seq candidates)) (seq display-cands))
-        is-suffix? (empty? buffer)]
+        is-suffix? (empty? buffer)
+        item-w (+ 16.0 (* 2.0 (:candidate-font-size style)))]
     (if show?
       (f/widget
-       :context ctx
-       :let [size (m/MediaQuery.sizeOf ctx)
-             screen-w (.-width size)
-             screen-h (.-height size)
-             
-             ;; 1. Estimate overlay dimensions
-             ;; Box width is roughly 160px for vertical Mongol text
-             box-w 160.0
-             ;; Box height is dynamic based on items (approx 45px per item + 40px padding/footer)
-             box-h (+ 40.0 (* (count display-cands) 45.0))
-             
-             ;; Extract raw caret coordinates
+       :get {{{surface .-surfaceContainerHigh
+               on-surface .-onSurface
+               outline .-outlineVariant
+               primary .-primary
+               tertiary .-tertiary
+               primary-container .-primaryContainer
+               tertiary-container .-tertiaryContainer
+               on-primary-container .-onPrimaryContainer
+               on-tertiary-container .-onTertiaryContainer} .-colorScheme
+              brightness .-brightness} m/Theme
+             :value-of [m/MediaQuery]}
+       :let [is-dark? (= brightness m.Brightness/dark)
+             colors {:surface surface
+                     :on-surface on-surface
+                     :outline outline
+                     :accent (if is-suffix? tertiary primary)
+                     :accent-container (if is-suffix? tertiary-container primary-container)
+                     :accent-on-container (if is-suffix? on-tertiary-container on-primary-container)
+                     :shadow-alpha (if is-dark? 0.45 0.18)
+                     :elevation (if is-dark? 8.0 10.0)}
+             {:flds [width height]} (.-size media-query)
+             screen-w width
+             screen-h height
+
+             box-w (+ 48.0 (* (count display-cands) item-w))
+             box-h (+ 56.0 (* (count display-cands) (+ 12.0 (:candidate-font-size style))))
+
              caret-x (if caret-offset (.-dx caret-offset) 100.0)
              caret-y (if caret-offset (.-dy caret-offset) 100.0)
-             
-             ;; 2. 🌟 Smart X-Axis (Horizontal) Flipping
-             ;; Try placing on the right. If it exceeds screen width, flip it to the left of the caret!
+
              right-pos (+ caret-x 30.0)
              safe-x (if (> (+ right-pos box-w) screen-w)
-                      (max 10.0 (- caret-x box-w 10.0)) ;; Flip left, ensuring it doesn't go off-screen left
+                      (max 10.0 (- caret-x box-w 10.0))
                       right-pos)
-                      
-             ;; 3. 🌟 Smart Y-Axis (Vertical) Clamping
-             ;; Ensure the box never goes below the bottom edge or above the top edge
+
              safe-y (max 10.0 (min caret-y (- screen-h box-h 20.0)))]
-       
+
        (m/Positioned
-        ;; Use the calculated safe physical coordinates
         .left safe-x
         .top safe-y
         .child
-        (m/Material
-         .elevation 8.0 .color m.Colors/white .borderRadius (m.BorderRadius/circular 4.0)
+        (m/PhysicalModel
+         .color m.Colors/transparent
+         .elevation (:elevation colors)
+         .shadowColor (.withOpacity m.Colors/black (:shadow-alpha colors))
+         .borderRadius (m.BorderRadius/circular 12.0)
          .child
-         (m/Container
-          .padding (m.EdgeInsets/all 10.0)
-          .decoration (m/BoxDecoration .border (m/Border.all .color (if is-suffix? m.Colors/orange m.Colors/blue))
-                                       .borderRadius (m.BorderRadius/circular 4.0))
+         (m/ClipRRect
+          .borderRadius (m.BorderRadius/circular 12.0)
           .child
-          (m/Column
-           .mainAxisSize m.MainAxisSize/min
-           .children
-           [(m/Row
-             .mainAxisSize m.MainAxisSize/min
-             .crossAxisAlignment m.CrossAxisAlignment/start
-             .children (map-indexed #(candidate-item %1 %2 is-suffix?) display-cands))
-            (m/Text (str (inc page-index) "/" (ctrl/total-pages state)) .style (m/TextStyle .fontSize 10.0))])))))
-      
+          (m/Container
+           .decoration (m/BoxDecoration
+                        .color (:surface colors)
+                        .border (m/Border.all
+                                 .color (.withOpacity (:outline colors) 0.75)
+                                 .width 1.0)
+                        .borderRadius (m.BorderRadius/circular 12.0))
+           .child
+           (m/Column
+            .mainAxisSize m.MainAxisSize/min
+            .children
+            [(m/Container
+              .height 3.0
+              .decoration (m/BoxDecoration
+                           .gradient (m/LinearGradient
+                                      .colors [(:accent colors)
+                                               (.withOpacity (:accent colors) 0.55)])))
+             (m/Padding
+              .padding (m.EdgeInsets/fromLTRB 6.0 10.0 6.0 4.0)
+              .child (candidate-row display-cands colors style))
+             (page-indicator state colors style)]))))))
+
       (m/Positioned .child (m/SizedBox.shrink)))))
 
-(defn ime-global-wrapper 
+(defn ime-global-wrapper
   "Wraps a child widget with the global IME candidates overlay.
-   Provides an optional wrapper-id to avoid GlobalKey conflicts when used multiple times in the widget tree."
-  ;; Support single arity for backward compatibility
+   Provides an optional wrapper-id to avoid GlobalKey conflicts when used multiple times in the widget tree.
+
+   The overlay automatically follows the caller's Theme / ColorScheme,
+   including light and dark mode.
+
+   Typography can be customized globally via `set-overlay-style!`."
   ([child]
-   (ime-global-wrapper child "default-ime-wrapper"))
-  ;; Support two arities: pass a unique ID to prevent crashes
+   (ime-global-wrapper child "default-ime-wrapper" nil))
   ([child wrapper-id]
+   (ime-global-wrapper child wrapper-id nil))
+  ([child wrapper-id overlay-style]
    (f/widget
-    ;; Assign a fixed identity to break GlobalKey conflicts
     :key (m/ValueKey. wrapper-id)
     :context ctx
-    :watch [state ctrl/!ime-state]
-    :let [;; Detect if the current wrapper is at the top of the route stack (active state)
+    :watch [state ctrl/!ime-state
+            global-style !overlay-style]
+    :let [style (merge global-style overlay-style)
           route (m/ModalRoute.of ctx)
           is-active? (if route (.-isCurrent route) true)]
-    (m/Stack 
-     .children 
-     [child 
-      ;; Only render the candidate overlay if this wrapper is currently active/visible at the front
+    (m/Stack
+     .children
+     [child
       (if is-active?
-        (candidates-overlay state)
+        (candidates-overlay state style)
         (m/SizedBox.shrink))]))))
