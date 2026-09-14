@@ -319,10 +319,10 @@
             (let [ctx-text (get-ctx)
                   match (re-find #"([\u1800-\u18AF\u202F\u180E\u200C\u200D]+)$" ctx-text)]
               (if match
-                (do
+                (let [word (first match)
+                      word-len (count word)]
                   (when-let [replace-fn (:replace-text! @!active-client)]
-                    ;; Delete one character at a time (was word-len)
-                    (replace-fn 1 ""))
+                    (replace-fn word-len ""))
                   (swap! !ime-state assoc :candidates [] :page-index 0)
                   m/KeyEventResult.handled)
                 (do
