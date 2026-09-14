@@ -196,8 +196,14 @@
                             (= logical-key s/LogicalKeyboardKey.backslash) "\u180D"
                             (or (= char-str ",") (= logical-key s/LogicalKeyboardKey.comma)) "\u1802"
                             (or (= char-str ".") (= logical-key s/LogicalKeyboardKey.period)) "\u1803"
-                            (= char-str "?")  "\uFF1F"
-                            (= char-str "!") "\uFF01"
+                            ;; ? / ？ → fullwidth ？ (CN layouts often emit ？ already; Shift+/ may not set char)
+                            (or (= char-str "?") (= char-str "\uFF1F")
+                                (= logical-key s/LogicalKeyboardKey.question)
+                                (and shift? (= logical-key s/LogicalKeyboardKey.slash))) "\uFF1F"
+                            ;; ! / ！ → fullwidth ！
+                            (or (= char-str "!") (= char-str "\uFF01")
+                                (= logical-key s/LogicalKeyboardKey.exclamation)
+                                (and shift? (= logical-key s/LogicalKeyboardKey.digit1))) "\uFF01"
                             :else nil))]
 
       (when (not shift-key?)
