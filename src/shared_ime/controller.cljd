@@ -313,16 +313,28 @@
             (let [ctx-text (get-ctx)
                   match (re-find #"([\u1800-\u18AF\u202F\u180E\u200C\u200D]+)$" ctx-text)]
               (if match
-                (let [word (first match)
-                      word-len (count word)]
+                (do
                   (when-let [replace-fn (:replace-text! @!active-client)]
-                    (replace-fn word-len ""))
+                    ;; Delete one character at a time (was word-len)
+                    (replace-fn 1 ""))
                   (swap! !ime-state assoc :candidates [] :page-index 0)
                   m/KeyEventResult.handled)
                 (do
                   (swap! !ime-state assoc :candidates [] :page-index 0)
                   m/KeyEventResult.ignored)))
             m/KeyEventResult.ignored))
+
+        ;; While composing: left/right arrow forces commit, then lets Flutter move the caret
+        (and (or (seq buffer) (seq candidates))
+             (or (= logical-key s/LogicalKeyboardKey.arrowLeft)
+                 (= logical-key s/LogicalKeyboardKey.arrowRight)))
+        (do
+          (let [word-to-commit (or (get-current-page-word @!ime-state) 
+                                   (when (seq buffer) (mapping/translate buffer)))]
+            (when word-to-commit
+              (commit-text! word-to-commit :add-space-after? false)))
+          ;; Return ignored so the text field still handles the arrow and moves the caret
+          m/KeyEventResult.ignored)
 
         (and (not latin-mode?) (= logical-key s/LogicalKeyboardKey.space))
         (if (or (seq buffer) (seq candidates))

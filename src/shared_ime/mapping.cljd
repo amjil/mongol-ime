@@ -60,10 +60,14 @@
 (defn translate
   "Translates a Latin input string into a Mongolian lookup string.
    Iterates through each character, mapping it to its Mongolian Unicode equivalent.
-   If a character is not found in the map, it remains unchanged."
+   If an uppercase character is not explicitly mapped, falls back to its lowercase mapping."
   [latin-str]
   (let [sb (dc/StringBuffer.)]
     (doseq [ch (seq latin-str)]
-      (let [m-char (get latin->mongol-map (str ch) (str ch))]
+      (let [s (str ch)
+            ;; Fallback: try original char (e.g. "N"), then lowercase (e.g. "n"),
+            ;; otherwise keep the original Latin character.
+            m-char (get latin->mongol-map s 
+                        (get latin->mongol-map (.toLowerCase s) s))]
         (.write sb m-char)))
     (.toString sb)))
