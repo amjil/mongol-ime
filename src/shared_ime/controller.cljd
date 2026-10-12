@@ -127,8 +127,11 @@
   (swap! !ime-state assoc :caret-offset offset))
 
 (defn commit-text! 
-  "Commit text: Insert the selected Mongolian word, then show next-word candidates."
-  [text & {:keys [add-space-after?] :or {add-space-after? false}}]
+  "Commit text: Insert the selected Mongolian word, then show next-word candidates.
+   Pass :predict? false to commit without refilling the candidate panel."
+  [text & {:keys [add-space-after? predict?]
+           :or {add-space-after? false
+                predict? true}}]
   (when-let [client @!active-client]
     (let [{:keys [preview-len]} @!ime-state
           ;; Only strip leading ASCII spaces (prev commit already added one).
@@ -149,7 +152,7 @@
         (f delete-len final-text))
       (let [gen (next-candidate-gen!)]
         (swap! !ime-state assoc :buffer "" :preview-len 0 :candidates [] :page-index 0)
-        (when (seq word-for-predict)
+        (when (and predict? (seq word-for-predict))
           (-> (next-word/get-predictions-async word-for-predict query-opts)
               (.then (fn [next-words]
                        (when (and (seq next-words)
@@ -157,6 +160,29 @@
                          (swap! !ime-state assoc
                                 :candidates (vec next-words)
                                 :page-index 0))))))))))
+
+;; ASCII, fullwidth / CJK, and Mongolian punctuation (᠂ ᠃).
+;; "-" "=" "+" stay composition / page keys and are not listed here.
+(def ^:private symbol-chars
+  "᠂᠃，。、；：？！＂＇（）【】《》〈〉「」『』〔〕…—～·•,.?;:'\"()[]{}<>/\\@#$%^&*`~|")
+
+(defn- symbol-char? [s]
+  (and (string? s)
+       (= 1 (count s))
+       (str/includes? symbol-chars s)))
+
+(defn- inject-symbol!
+  "Insert a symbol. Commit an in-progress composition without next-word
+   prediction, then drop the candidate panel so an in-flight query cannot
+   reopen it."
+  [ch]
+  (when (seq (:buffer @!ime-state))
+    (commit-text! (or (get-current-page-word @!ime-state)
+                      (mapping/translate (:buffer @!ime-state)))
+                  :predict? false))
+  (when-let [f (:replace-text! @!active-client)]
+    (f (:preview-len @!ime-state) ch))
+  (clear-candidates!))
 
 ;; ==========================================
 ;; Keyboard Event Dispatcher
@@ -194,8 +220,12 @@
                             (= logical-key s/LogicalKeyboardKey.bracketLeft) "\u180B"
                             (= logical-key s/LogicalKeyboardKey.bracketRight) "\u180C"
                             (= logical-key s/LogicalKeyboardKey.backslash) "\u180D"
-                            (or (= char-str ",") (= logical-key s/LogicalKeyboardKey.comma)) "\u1802"
-                            (or (= char-str ".") (= logical-key s/LogicalKeyboardKey.period)) "\u1803"
+                            ;; , / ， / ᠂ → Mongolian comma. Clears candidates via inject-symbol!.
+                            (or (= char-str ",") (= char-str "\uFF0C") (= char-str "\u1802")
+                                (= logical-key s/LogicalKeyboardKey.comma)) "\u1802"
+                            ;; . / 。 / ． / ᠃ → Mongolian full stop.
+                            (or (= char-str ".") (= char-str "\u3002") (= char-str "\uFF0E") (= char-str "\u1803")
+                                (= logical-key s/LogicalKeyboardKey.period)) "\u1803"
                             ;; ? / ？ → fullwidth ？ (CN layouts often emit ？ already; Shift+/ may not set char)
                             (or (= char-str "?") (= char-str "\uFF1F")
                                 (= logical-key s/LogicalKeyboardKey.question)
@@ -268,13 +298,10 @@
           m/KeyEventResult.ignored)
 
         ;; 🌟 INJECT DIRECT CHARACTERS (Punctuation, FVS, NNBSP)
+        ;; Commit any composition, insert the symbol, and close candidates.
         (some? direct-char)
         (do
-          (when (seq buffer)
-            (commit-text! (or (get-current-page-word @!ime-state) (mapping/translate buffer))))
-          (when-let [f (:replace-text! @!active-client)]
-            (f (:preview-len @!ime-state) direct-char))
-          (swap! !ime-state assoc :buffer "" :preview-len 0 :candidates [] :page-index 0)
+          (inject-symbol! direct-char)
           m/KeyEventResult.handled)
 
         ;; 🌟 When candidates are visible: - / = / + only paginate (do not insert into buffer)
@@ -376,6 +403,12 @@
           (swap! !ime-state (fn [s] 
                               (if (> (:page-index s) 0) 
                                 (update s :page-index dec) s)))
+          m/KeyEventResult.handled)
+
+        ;; Other punctuation (e.g. ；：、（）) is inserted as-is and closes candidates.
+        (and (not latin-mode?) (symbol-char? char-str))
+        (do
+          (inject-symbol! char-str)
           m/KeyEventResult.handled)
 
         :else m/KeyEventResult.ignored))))
