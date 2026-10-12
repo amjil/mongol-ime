@@ -1,6 +1,7 @@
 (ns shared-ime.overlay-view
   (:require
    ["package:flutter/material.dart" :as m]
+   ["package:flutter/rendering.dart" :as rendering]
    ["package:mongol/mongol.dart" :as mongol]
    [cljd.flutter :as f]
    [shared-ime.controller :as ctrl]))
@@ -109,6 +110,26 @@
                       .size icon-size
                       .color (.withOpacity (:accent-on-container colors) 0.55))]))))
 
+(defn- stack-local-offset
+  "Caret offsets are stored in global coordinates. The candidate stack may sit
+   under a transform (web density scale), so position in that stack's space.
+   Returns `:pending` until this context has a laid-out render object."
+  [^m/BuildContext ctx ^m/Offset offset]
+  (try
+    (let [root (.findRenderObject ctx)]
+      (if (nil? root)
+        :pending
+        (loop [ro root]
+          (cond
+            (nil? ro) offset
+            (instance? rendering/RenderStack ro)
+            (if (and (.-attached ^rendering/RenderBox ro)
+                     (.-hasSize ^rendering/RenderBox ro))
+              (.globalToLocal ^rendering/RenderBox ro offset)
+              :pending)
+            :else (recur (.-parent ro))))))
+    (catch Exception _ offset)))
+
 (defn candidates-overlay [state style]
   (let [{:keys [buffer candidates page-index page-size caret-offset]} state
         display-cands (->> candidates (drop (* page-index page-size)) (take page-size))
@@ -117,6 +138,9 @@
         item-w (+ 16.0 (* 2.0 (:candidate-font-size style)))]
     (if show?
       (f/widget
+       :context ctx
+       :managed [!layout-tick (#(atom 0)) :dispose nil]
+       :watch [_tick !layout-tick]
        :get {{{surface .-surfaceContainerHigh
                on-surface .-onSurface
                outline .-outlineVariant
@@ -128,7 +152,21 @@
                on-tertiary-container .-onTertiaryContainer} .-colorScheme
               brightness .-brightness} m/Theme
              :value-of [m/MediaQuery]}
-       :let [is-dark? (= brightness m.Brightness/dark)
+       :let [mapped (if caret-offset
+                      (do _tick (stack-local-offset ctx caret-offset))
+                      (m/Offset 100.0 100.0))
+             _ (when (= mapped :pending)
+                 (-> m/WidgetsBinding.instance
+                     (.addPostFrameCallback
+                      (fn [_]
+                        (try
+                          (when (and caret-offset
+                                     (not= :pending (stack-local-offset ctx caret-offset)))
+                            (swap! !layout-tick inc))
+                          (catch Exception _))
+                        nil)))
+                 nil)
+             is-dark? (= brightness m.Brightness/dark)
              colors {:surface surface
                      :on-surface on-surface
                      :outline outline
@@ -144,8 +182,8 @@
              box-w (+ 48.0 (* (count display-cands) item-w))
              box-h (+ 56.0 (* (count display-cands) (+ 12.0 (:candidate-font-size style))))
 
-             caret-x (if caret-offset (.-dx caret-offset) 100.0)
-             caret-y (if caret-offset (.-dy caret-offset) 100.0)
+             caret-x (if (= mapped :pending) 0.0 (.-dx ^m/Offset mapped))
+             caret-y (if (= mapped :pending) 0.0 (.-dy ^m/Offset mapped))
 
              right-pos (+ caret-x 30.0)
              safe-x (if (> (+ right-pos box-w) screen-w)
@@ -154,7 +192,9 @@
 
              safe-y (max 10.0 (min caret-y (- screen-h box-h 20.0)))]
 
-       (m/Positioned
+       (if (= mapped :pending)
+         (m/SizedBox.shrink)
+         (m/Positioned
         .left safe-x
         .top safe-y
         .child
@@ -187,7 +227,7 @@
              (m/Padding
               .padding (m.EdgeInsets/fromLTRB 6.0 10.0 6.0 4.0)
               .child (candidate-row display-cands colors style))
-             (page-indicator state colors style)]))))))
+             (page-indicator state colors style)])))))))
 
       (m/Positioned .child (m/SizedBox.shrink)))))
 
