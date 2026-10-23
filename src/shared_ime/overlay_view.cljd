@@ -111,23 +111,27 @@
                       .color (.withOpacity (:accent-on-container colors) 0.55))]))))
 
 (defn- stack-local-offset
-  "Caret offsets are stored in global coordinates. The candidate stack may sit
-   under a transform (web density scale), so position in that stack's space.
-   Returns `:pending` until this context has a laid-out render object."
+  "Caret offsets are stored in global coordinates. Convert to the nearest
+   ancestor `RenderStack` (the ime-global wrapper). Returns `:pending` until
+   that stack is laid out."
   [^m/BuildContext ctx ^m/Offset offset]
   (try
-    (let [root (.findRenderObject ctx)]
-      (if (nil? root)
-        :pending
-        (loop [ro root]
-          (cond
-            (nil? ro) offset
-            (instance? rendering/RenderStack ro)
-            (if (and (.-attached ^rendering/RenderBox ro)
-                     (.-hasSize ^rendering/RenderBox ro))
+    (if-let [^rendering/RenderStack stack
+             (#/(.findAncestorRenderObjectOfType rendering/RenderStack) ctx)]
+      (if (and (.-attached stack) (.-hasSize stack))
+        (.globalToLocal stack offset)
+        :pending)
+      (let [root (.findRenderObject ctx)]
+        (if (nil? root)
+          :pending
+          (loop [ro root]
+            (cond
+              (nil? ro) offset
+              (and (instance? rendering/RenderBox ro)
+                   (.-attached ^rendering/RenderBox ro)
+                   (.-hasSize ^rendering/RenderBox ro))
               (.globalToLocal ^rendering/RenderBox ro offset)
-              :pending)
-            :else (recur (.-parent ro))))))
+              :else (recur (.-parent ro)))))))
     (catch Exception _ offset)))
 
 (defn candidates-overlay [state style]
@@ -160,8 +164,7 @@
                      (.addPostFrameCallback
                       (fn [_]
                         (try
-                          (when (and caret-offset
-                                     (not= :pending (stack-local-offset ctx caret-offset)))
+                          (when caret-offset
                             (swap! !layout-tick inc))
                           (catch Exception _))
                         nil)))
