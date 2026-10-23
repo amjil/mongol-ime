@@ -419,3 +419,7 @@
 (defn unregister-client! [] 
   (reset! !active-client nil) 
   (clear-candidates!))
+
+;; Non-nil on editor / text-field shared state selects built-in IME routing.
+(def default-keyboard-delegate
+  {:use-shared-ime true})
