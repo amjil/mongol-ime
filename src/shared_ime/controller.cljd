@@ -220,12 +220,12 @@
                             (= logical-key s/LogicalKeyboardKey.bracketLeft) "\u180B"
                             (= logical-key s/LogicalKeyboardKey.bracketRight) "\u180C"
                             (= logical-key s/LogicalKeyboardKey.backslash) "\u180D"
-                            ;; Shift+, / < / ＜ → fullwidth double quote.
-                            (or (= char-str "<") (= char-str "\uFF1C")
-                                (and shift? (= logical-key s/LogicalKeyboardKey.comma))) "\uFF02"
-                            ;; Shift+. / > / ＞ → fullwidth double quote.
-                            (or (= char-str ">") (= char-str "\uFF1E")
-                                (and shift? (= logical-key s/LogicalKeyboardKey.period))) "\uFF02"
+                            ;; Shift+, / < / ＜ / 《 → left double angle bracket.
+                            (or (= char-str "<") (= char-str "\uFF1C") (= char-str "\u300A")
+                                (and shift? (= logical-key s/LogicalKeyboardKey.comma))) "\u300A"
+                            ;; Shift+. / > / ＞ / 》 → right double angle bracket.
+                            (or (= char-str ">") (= char-str "\uFF1E") (= char-str "\u300B")
+                                (and shift? (= logical-key s/LogicalKeyboardKey.period))) "\u300B"
                             ;; , / ， / ᠂ → Mongolian comma. Clears candidates via inject-symbol!.
                             (or (= char-str ",") (= char-str "\uFF0C") (= char-str "\u1802")
                                 (and (not shift?) (= logical-key s/LogicalKeyboardKey.comma))) "\u1802"
