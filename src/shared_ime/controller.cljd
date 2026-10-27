@@ -161,10 +161,10 @@
                                 :candidates (vec next-words)
                                 :page-index 0))))))))))
 
-;; ASCII, fullwidth / CJK, and Mongolian punctuation (᠂ ᠃).
+;; ASCII, fullwidth / CJK, and Mongolian punctuation (᠁ ᠂ ᠃ ᠄).
 ;; "-" "=" "+" stay composition / page keys and are not listed here.
 (def ^:private symbol-chars
-  "᠂᠃，。、；：？！＂＇（）【】《》〈〉「」『』〔〕…—～·•,.?;:'\"()[]{}<>/\\@#$%^&*`~|")
+  "᠁᠂᠃᠄，。、；：？！＂＇（）【】《》〈〉「」『』〔〕…—～·•,.?;:'\"()[]{}<>/\\@#$%^&*`~|")
 
 (defn- symbol-char? [s]
   (and (string? s)
@@ -240,6 +240,13 @@
                             (or (= char-str "!") (= char-str "\uFF01")
                                 (= logical-key s/LogicalKeyboardKey.exclamation)
                                 (and shift? (= logical-key s/LogicalKeyboardKey.digit1))) "\uFF01"
+                            ;; : / ： / ᠄ → Mongolian colon (before ; so Shift+; is not swallowed as ellipsis).
+                            (or (= char-str ":") (= char-str "\uFF1A") (= char-str "\u1804")
+                                (and shift? (= logical-key s/LogicalKeyboardKey.semicolon))) "\u1804"
+                            ;; ; / ； / … / ᠁ → Mongolian ellipsis (… from CN layouts e.g. Shift+6).
+                            (or (= char-str ";") (= char-str "\uFF1B") (= char-str "\u1801")
+                                (= char-str "\u2026")
+                                (and (not shift?) (= logical-key s/LogicalKeyboardKey.semicolon))) "\u1801"
                             :else nil))]
 
       (when (not shift-key?)
