@@ -220,12 +220,18 @@
                             (= logical-key s/LogicalKeyboardKey.bracketLeft) "\u180B"
                             (= logical-key s/LogicalKeyboardKey.bracketRight) "\u180C"
                             (= logical-key s/LogicalKeyboardKey.backslash) "\u180D"
+                            ;; Shift+, / < / ＜ → fullwidth double quote.
+                            (or (= char-str "<") (= char-str "\uFF1C")
+                                (and shift? (= logical-key s/LogicalKeyboardKey.comma))) "\uFF02"
+                            ;; Shift+. / > / ＞ → fullwidth double quote.
+                            (or (= char-str ">") (= char-str "\uFF1E")
+                                (and shift? (= logical-key s/LogicalKeyboardKey.period))) "\uFF02"
                             ;; , / ， / ᠂ → Mongolian comma. Clears candidates via inject-symbol!.
                             (or (= char-str ",") (= char-str "\uFF0C") (= char-str "\u1802")
-                                (= logical-key s/LogicalKeyboardKey.comma)) "\u1802"
+                                (and (not shift?) (= logical-key s/LogicalKeyboardKey.comma))) "\u1802"
                             ;; . / 。 / ． / ᠃ → Mongolian full stop.
                             (or (= char-str ".") (= char-str "\u3002") (= char-str "\uFF0E") (= char-str "\u1803")
-                                (= logical-key s/LogicalKeyboardKey.period)) "\u1803"
+                                (and (not shift?) (= logical-key s/LogicalKeyboardKey.period))) "\u1803"
                             ;; ? / ？ → fullwidth ？ (CN layouts often emit ？ already; Shift+/ may not set char)
                             (or (= char-str "?") (= char-str "\uFF1F")
                                 (= logical-key s/LogicalKeyboardKey.question)
